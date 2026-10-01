@@ -1,11 +1,11 @@
 ﻿<#
 .SYNOPSIS
-    mpv-lazy-ng 完整懒人包打包脚本
+    mpv-lazy 完整懒人包打包脚本
 .DESCRIPTION
     从 mpv 官方 Releases 获取最新主程序，与本仓库的配置体系、
     补丁工具、更新器组装成解压即用的完整懒人包。
 
-    产出：dist/mpv-lazy-ng-<日期>-mpv<版本>/ 与同名 .7z
+    产出：dist/mpv-lazy-<日期>-mpv<版本>/ 与同名 .7z
 
     用法：
       build-package.bat                交互式打包（默认已应用全部定制补丁，解压即用）
@@ -31,7 +31,7 @@ $ProgressPreference    = 'SilentlyContinue'
 
 # ━━━ 路径定位（脚本位于 <repo>/build/） ━━
 $repoDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
-$rootName = 'mpv-lazy-ng'
+$rootName = 'mpv-lazy'
 $dlDir = Join-Path $repoDir 'updater\_download'
 
 function Write-Info { param($m) Write-Host "  $m" -ForegroundColor Cyan }
@@ -68,7 +68,7 @@ function Get-LatestTagViaRedirect {
     param([string]$Repo = 'shinchiro/mpv-winbuild-cmake')
     $req = [Net.HttpWebRequest]::Create("https://github.com/$Repo/releases/latest")
     $req.AllowAutoRedirect = $false
-    $req.UserAgent = 'mpv-lazy-ng-builder'
+    $req.UserAgent = 'mpv-lazy-builder'
     $req.Timeout = 30000
     try {
         $resp = $req.GetResponse()
@@ -97,7 +97,7 @@ function Get-MpvBinaries {
     param([string]$DesiredTag)   # 为空则取最新（shinchiro 日期 tag）
 
     $repo = 'shinchiro/mpv-winbuild-cmake'
-    $headers = @{ 'User-Agent' = 'mpv-lazy-ng-builder' }
+    $headers = @{ 'User-Agent' = 'mpv-lazy-builder' }
     $tag = $DesiredTag
     $assetName = $null
     $url = $null
@@ -169,7 +169,7 @@ function Get-LazySource {
     try {
         $req = [Net.HttpWebRequest]::Create('https://github.com/hooke007/mpv_PlayKit/releases/latest')
         $req.AllowAutoRedirect = $false
-        $req.UserAgent = 'mpv-lazy-ng-builder'
+        $req.UserAgent = 'mpv-lazy-builder'
         $req.Timeout = 30000
         $resp = $req.GetResponse()
         $loc = $resp.Headers['Location']
@@ -255,7 +255,7 @@ function Install-LazyExtras {
 
 # ━━━ 主流程 ━━
 Write-Host ""
-Write-Host " ━━ mpv-lazy-ng 完整懒人包构建 ━━" -ForegroundColor Cyan
+Write-Host " ━━ mpv-lazy 完整懒人包构建 ━━" -ForegroundColor Cyan
 Write-Host ""
 
 # 前置检查：仓库文件齐备

@@ -28,7 +28,7 @@ jobs:
         shell: pwsh
         run: |
           $rel = Invoke-RestMethod 'https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest' `
-                   -Headers @{ 'User-Agent' = 'mpv-lazy-ng-ci' }
+                   -Headers @{ 'User-Agent' = 'mpv-lazy-ci' }
           $asset = $rel.assets | Where-Object { $_.name -match '^mpv-x86_64-\d{8}-git-[0-9a-f]+\.7z$' } | Select-Object -First 1
           if (-not $asset) { throw "release $($rel.tag_name) 未找到 mpv-x86_64 资产" }
           # 构建标识：日期-git-hash（资产名去掉 .7z），如 20261001-git-3186d369f9
@@ -127,7 +127,7 @@ jobs:
             gh release delete $tag --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag
           }
           $body = @"
-          ## mpv-lazy-ng 自动构建（定制成品）
+          ## mpv-lazy 自动构建（定制成品）
 
           - mpv 主程序：**$bid**（[shinchiro 每日构建](https://github.com/shinchiro/mpv-winbuild-cmake/releases)，随 mpv 官方 master 更新，含 vapoursynth 补帧/AI 支持）
           - 附 VapourSynth 运行时：右键菜单「VF滤镜 > 补帧/自定义AI」开箱即用
@@ -139,5 +139,5 @@ jobs:
           "@
           gh release create $tag $archive.FullName `
             --repo $env:GITHUB_REPOSITORY `
-            --title "mpv-lazy-ng · $bid" `
+            --title "mpv-lazy · $bid" `
             --notes $body

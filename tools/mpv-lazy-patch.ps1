@@ -5,7 +5,7 @@
     菜单式选择功能模块，进入后选择应用或恢复。
     添加新功能时，只需在下面添加 PatchList 条目即可。
 .NOTES
-    将脚本放到 mpv-lazy-ng 根目录或 tools/ 子目录下均可，双击 mpv-lazy-patch.bat 运行
+    将脚本放到 mpv-lazy 根目录或 tools/ 子目录下均可，双击 mpv-lazy-patch.bat 运行
 #>
 
 # ━━━ 自动检索配置目录 ━━
@@ -22,9 +22,9 @@ foreach ($p in $candidates) {
     }
 }
 if (-not $CfgDir) {
-    Write-Host "[错误] 未找到 mpv.conf，请将此脚本放到 mpv-lazy-ng 根目录或 tools/ 目录下" -ForegroundColor Red
-    Write-Host "目录结构应为：mpv-lazy-ng/tools/mpv-lazy-patch.ps1" -ForegroundColor Yellow
-    Write-Host "                 mpv-lazy-ng/portable_config/mpv.conf" -ForegroundColor Yellow
+    Write-Host "[错误] 未找到 mpv.conf，请将此脚本放到 mpv-lazy 根目录或 tools/ 目录下" -ForegroundColor Red
+    Write-Host "目录结构应为：mpv-lazy/tools/mpv-lazy-patch.ps1" -ForegroundColor Yellow
+    Write-Host "                 mpv-lazy/portable_config/mpv.conf" -ForegroundColor Yellow
     Read-Host "按回车退出"
     exit 1
 }

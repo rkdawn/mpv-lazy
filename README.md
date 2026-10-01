@@ -1,4 +1,4 @@
-# mpv-lazy-ng · 跟随 mpv 官方的懒人包
+# mpv-lazy · 跟随 mpv 官方的懒人包
 
 基于 [hooke007/mpv_PlayKit](https://github.com/hooke007/mpv_PlayKit)（mpv-lazy）的配置体系复刻，
 **主程序跟随 [shinchiro/mpv-winbuild-cmake](https://github.com/shinchiro/mpv-winbuild-cmake) 每日构建更新**
@@ -12,7 +12,7 @@ mpv 官方 Releases 的 CI 构建不含 vapoursynth，故不采用），
 
 ## 与原 mpv-lazy 的差异
 
-| 项目 | mpv-lazy（原） | mpv-lazy-ng（本项目） |
+| 项目 | mpv-lazy（原） | mpv-lazy（本项目） |
 |---|---|---|
 | mpv 主程序 | hooke007 打包的第三方构建，随其发布节奏 | **shinchiro 每日构建**（含 vapoursynth），每日跟随 mpv master |
 | 更新方式 | 等待整包重新发布 | `updater\update-mpv.bat` 一键跟随最新构建 |
@@ -25,7 +25,7 @@ mpv 官方 Releases 的 CI 构建不含 vapoursynth，故不采用），
 ## 目录结构
 
 ```
-mpv-lazy-ng/
+mpv-lazy/
 ├── portable_config/          # 配置体系（mpv.conf / uosc / 着色器 / 字体 …）
 ├── tools/                    # 模块化补丁工具（打包时复制到包根目录）
 │   ├── mpv-lazy-patch.bat        双击运行
@@ -91,7 +91,7 @@ pwsh updater\update-mpv.ps1 -Arch msvc
 ## 构建完整懒人包（项目维护侧）
 
 ```powershell
-# 双击或运行：产出 dist/mpv-lazy-ng-<日期>-mpv<版本>/
+# 双击或运行：产出 dist/mpv-lazy-<日期>-mpv<版本>/
 build\build-package.bat
 
 # 指定 mpv 版本、跳过压缩

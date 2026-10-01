@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-    mpv-lazy-ng 主程序更新器（跟随 mpv 官方 master 每日构建）
+    mpv-lazy 主程序更新器（跟随 mpv 官方 master 每日构建）
 .DESCRIPTION
     从 shinchiro/mpv-winbuild-cmake Releases 检查并下载最新 mpv 构建
     （该构建随 mpv 官方 master 每日更新，且启用 vapoursynth —— 补帧/AI 滤镜必需；
@@ -70,7 +70,7 @@ function Get-LatestTagViaRedirect {
     # https://github.com/<repo>/releases/latest 会 302 到 .../tag/<tag>
     $req = [Net.HttpWebRequest]::Create("https://github.com/$Repo/releases/latest")
     $req.AllowAutoRedirect = $false
-    $req.UserAgent = 'mpv-lazy-ng-updater'
+    $req.UserAgent = 'mpv-lazy-updater'
     $req.Timeout = 30000
     try {
         $resp = $req.GetResponse()
@@ -97,7 +97,7 @@ function Get-ShinchiroAssetName {
 
 function Get-LatestRelease {
     param([string]$Repo)
-    $headers = @{ 'User-Agent' = 'mpv-lazy-ng-updater' }
+    $headers = @{ 'User-Agent' = 'mpv-lazy-updater' }
     try {
         return Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest" -Headers $headers -TimeoutSec 30
     } catch {
@@ -186,7 +186,7 @@ function Find-SevenZip {
 if ($Component -eq 'mpv') {
 
     Write-Host ""
-    Write-Host " ━━ mpv-lazy-ng · mpv 主程序更新（shinchiro 每日构建 · 含 vapoursynth） ━━" -ForegroundColor Cyan
+    Write-Host " ━━ mpv-lazy · mpv 主程序更新（shinchiro 每日构建 · 含 vapoursynth） ━━" -ForegroundColor Cyan
     Write-Host ""
 
     $installed = Get-InstalledMpvVersion
@@ -290,7 +290,7 @@ if ($Component -eq 'mpv') {
 elseif ($Component -eq 'ytdlp') {
 
     Write-Host ""
-    Write-Host " ━━ mpv-lazy-ng · yt-dlp 更新（官方源） ━━" -ForegroundColor Cyan
+    Write-Host " ━━ mpv-lazy · yt-dlp 更新（官方源） ━━" -ForegroundColor Cyan
     Write-Host ""
 
     $ytPath = Join-Path $rootDir 'yt-dlp.exe'
