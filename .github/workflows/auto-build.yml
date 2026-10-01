@@ -58,8 +58,9 @@ jobs:
         shell: pwsh
         run: |
           $bid = '${{ steps.upstream.outputs.buildId }}'
-          # buildId 形如 20261001-git-3186d369f9 → 传日期 tag 给构建脚本
-          $dateTag = ($bid -split '-git-')[0]
+          # buildId 形如 mpv-x86_64-20261001-git-3186d369f9 → 提取日期部分 20261001 作为 tag
+          $dateTag = if ($bid -match '(\d{8})-git-') { $Matches[1] } else { $bid }
+          Write-Host "构建日期 tag: $dateTag"
           pwsh -NoProfile -ExecutionPolicy Bypass -File build/build-package.ps1 -Y -Tag $dateTag
           Get-ChildItem dist
 
