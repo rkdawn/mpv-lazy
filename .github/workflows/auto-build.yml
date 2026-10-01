@@ -1,6 +1,8 @@
 name: auto-build
 
-# 跟随 mpv 官方：每天检查上游新版本，有新版自动构建懒人包并发布 Release
+# 跟随 mpv 官方 master 每日构建（shinchiro）：每天检查上游新构建，自动打包发布 Release
+# 注：二进制源为 shinchiro/mpv-winbuild-cmake —— mpv 官方 Releases 的 CI 构建未启用
+#     vapoursynth，补帧/AI 滤镜不可用；shinchiro 构建随 mpv master 每日更新且含 vapoursynth
 on:
   schedule:
     - cron: '0 22 * * *'    # UTC 22:00 = 北京时间每天 06:00
@@ -21,14 +23,18 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: 查询 mpv 官方最新版本
+      - name: 查询 shinchiro 最新构建（mpv 官方 master 跟随源）
         id: upstream
         shell: pwsh
         run: |
-          $tag = (Invoke-RestMethod 'https://api.github.com/repos/mpv-player/mpv/releases/latest' `
-                   -Headers @{ 'User-Agent' = 'mpv-lazy-ng-ci' }).tag_name
-          "tag=$tag" | Out-File $env:GITHUB_OUTPUT -Append
-          Write-Host "mpv 官方最新: $tag"
+          $rel = Invoke-RestMethod 'https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest' `
+                   -Headers @{ 'User-Agent' = 'mpv-lazy-ng-ci' }
+          $asset = $rel.assets | Where-Object { $_.name -match '^mpv-x86_64-\d{8}-git-[0-9a-f]+\.7z$' } | Select-Object -First 1
+          if (-not $asset) { throw "release $($rel.tag_name) 未找到 mpv-x86_64 资产" }
+          # 构建标识：日期-git-hash（资产名去掉 .7z），如 20261001-git-3186d369f9
+          $buildId = $asset.name -replace '\.7z$', ''
+          "buildId=$buildId" | Out-File $env:GITHUB_OUTPUT -Append
+          Write-Host "shinchiro 最新构建: $buildId"
 
       - name: 检查是否已构建过该版本
         id: check
@@ -36,22 +42,25 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $up = '${{ steps.upstream.outputs.tag }}'
+          $bid = '${{ steps.upstream.outputs.buildId }}'
           $existing = gh release list --repo $env:GITHUB_REPOSITORY --limit 50 |
-                      Select-String -SimpleMatch "mpv$up"
+                      Select-String -SimpleMatch $bid
           if ($existing -and '${{ inputs.force }}' -ne 'true') {
             "skip=true" | Out-File $env:GITHUB_OUTPUT -Append
-            Write-Host "mpv$up 已构建过，跳过"
+            Write-Host "$bid 已构建过，跳过"
           } else {
             "skip=false" | Out-File $env:GITHUB_OUTPUT -Append
-            Write-Host "需要构建 mpv$up"
+            Write-Host "需要构建 $bid"
           }
 
       - name: 构建懒人包
         if: steps.check.outputs.skip == 'false'
         shell: pwsh
         run: |
-          pwsh -NoProfile -ExecutionPolicy Bypass -File build/build-package.ps1 -Y
+          $bid = '${{ steps.upstream.outputs.buildId }}'
+          # buildId 形如 20261001-git-3186d369f9 → 传日期 tag 给构建脚本
+          $dateTag = ($bid -split '-git-')[0]
+          pwsh -NoProfile -ExecutionPolicy Bypass -File build/build-package.ps1 -Y -Tag $dateTag
           Get-ChildItem dist
 
       - name: 发布 Release
@@ -60,9 +69,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $up = '${{ steps.upstream.outputs.tag }}'
-          $date = Get-Date -Format 'yyyyMMdd'
-          $tag = "auto-mpv$up-$date"
+          $bid = '${{ steps.upstream.outputs.buildId }}'
+          $tag = "auto-$bid"
           $archive = Get-ChildItem dist -Filter *.7z | Select-Object -First 1
           # force 重建场景：同 tag release 已存在则删除后重建，保证 Release 始终为最新构建
           gh release view $tag --repo $env:GITHUB_REPOSITORY 2>$null
@@ -73,13 +81,15 @@ jobs:
           $body = @"
           ## mpv-lazy-ng 自动构建（定制成品）
 
-          - mpv 主程序：**$up**（[官方 Release](https://github.com/mpv-player/mpv/releases/tag/$up)）
-          - 构建日期：$(Get-Date -Format 'yyyy-MM-dd HH:mm')
+          - mpv 主程序：**$bid**（[shinchiro 每日构建](https://github.com/shinchiro/mpv-winbuild-cmake/releases)，随 mpv 官方 master 更新，含 vapoursynth 补帧/AI 支持）
+          - 附 VapourSynth 运行时：右键菜单「VF滤镜 > 补帧/自定义AI」开箱即用
+          - 附 yt-dlp / umpv / 中文手册
           - 已预应用全部定制补丁，解压即用
+          - 构建日期：$(Get-Date -Format 'yyyy-MM-dd HH:mm')
 
           更新请使用包内 ``updater\update-mpv.bat``。
           "@
           gh release create $tag $archive.FullName `
             --repo $env:GITHUB_REPOSITORY `
-            --title "mpv-lazy-ng · mpv $up" `
+            --title "mpv-lazy-ng · $bid" `
             --notes $body
