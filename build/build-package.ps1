@@ -13,12 +13,16 @@
       build-package.ps1 -NoPatches     不应用定制补丁（纯净 mpv-lazy 原版配置）
       build-package.ps1 -Tag v0.41.0   指定 mpv 版本（默认最新）
       build-package.ps1 -Skip7z        只产出目录，不压缩
+      build-package.ps1 -NoVS          不打包 VapourSynth 补帧/AI 超分运行时（包体减小约 200MB）
+      build-package.ps1 -VSSource 路径 指定原版 mpv-lazy exe/已解压目录（默认自动定位本地或联网下载）
 #>
 param(
     [switch]$Y,                        # 自动确认
     [string]$Tag = '',                 # 指定 mpv 版本 tag（如 v0.41.0），默认最新
     [switch]$Skip7z,                   # 不打包 7z
-    [switch]$NoPatches                 # 不应用定制补丁
+    [switch]$NoPatches,                # 不应用定制补丁
+    [switch]$NoVS,                     # 不打包 VapourSynth 运行时
+    [string]$VSSource = ''             # 原版 mpv-lazy 的 exe 或解压目录
 )
 
 $ErrorActionPreference = 'Stop'
@@ -61,7 +65,8 @@ function Find-SevenZip {
 
 # ━━━ 通过 302 重定向获取最新 tag（API 限流时的降级通道，不消耗配额） ━━
 function Get-LatestTagViaRedirect {
-    $req = [Net.HttpWebRequest]::Create('https://github.com/mpv-player/mpv/releases/latest')
+    param([string]$Repo = 'shinchiro/mpv-winbuild-cmake')
+    $req = [Net.HttpWebRequest]::Create("https://github.com/$Repo/releases/latest")
     $req.AllowAutoRedirect = $false
     $req.UserAgent = 'mpv-lazy-ng-builder'
     $req.Timeout = 30000
@@ -74,77 +79,178 @@ function Get-LatestTagViaRedirect {
     return $null
 }
 
-# ━━━ 获取 mpv 官方构建（优先复用缓存） ━━
-function Get-MpvBinaries {
-    param([string]$DesiredTag)   # 为空则取最新
+# 别名（供降级路径调用）
+function Get-LatestTagViaRedirectCustom { param([string]$Repo) Get-LatestTagViaRedirect -Repo $Repo }
 
+# ━━━ 获取 mpv 构建（shinchiro 每日 master 构建 = mpv 官方 master 的跟随源，含 vapoursynth 滤镜；优先复用缓存） ━━
+# 说明：mpv 官方 Releases 的 CI 构建未启用 vapoursynth（补帧/AI 滤镜不可用），
+#       原版 mpv-lazy 亦使用本系构建。shinchiro releases：tag=日期，资产 mpv-x86_64-<日期>-git-<hash>.7z
+function Get-ShinchiroAssetName {
+    param([string]$Tag)
+    $page = Invoke-WebRequest -Uri "https://github.com/shinchiro/mpv-winbuild-cmake/releases/expanded_assets/$Tag" -UseBasicParsing -TimeoutSec 30
+    $m = [regex]::Match($page.Content, '/shinchiro/mpv-winbuild-cmake/releases/download/' + [regex]::Escape($Tag) + '/(mpv-x86_64-\d{8}-git-[0-9a-f]+\.7z)')
+    if ($m.Success) { return $m.Groups[1].Value }
+    return $null
+}
+
+function Get-MpvBinaries {
+    param([string]$DesiredTag)   # 为空则取最新（shinchiro 日期 tag）
+
+    $repo = 'shinchiro/mpv-winbuild-cmake'
     $headers = @{ 'User-Agent' = 'mpv-lazy-ng-builder' }
-    $sha256 = $null
-    if ($DesiredTag) {
-        # 指定版本：直接构造固定 URL
-        $tag = $DesiredTag
-        $url = "https://github.com/mpv-player/mpv/releases/download/$tag/mpv-$tag-x86_64-w64-mingw32.zip"
-    } else {
+    $tag = $DesiredTag
+    $assetName = $null
+    $url = $null
+
+    if (-not $tag) {
         try {
-            $rel = Invoke-RestMethod -Uri 'https://api.github.com/repos/mpv-player/mpv/releases/latest' -Headers $headers -TimeoutSec 30
+            $rel = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest" -Headers $headers -TimeoutSec 30
             $tag = $rel.tag_name
-            $assetName = "mpv-$tag-x86_64-w64-mingw32.zip"
-            $asset = $rel.assets | Where-Object { $_.name -eq $assetName }
-            if (-not $asset) { Write-Err "资产未找到：$assetName"; exit 1 }
-            $url = $asset.browser_download_url
-            if ($asset.digest -match 'sha256:([0-9a-f]+)') { $sha256 = $Matches[1] }
+            $a = $rel.assets | Where-Object { $_.name -match '^mpv-x86_64-\d{8}-git-[0-9a-f]+\.7z$' } | Select-Object -First 1
+            if (-not $a) { Write-Err "shinchiro release $tag 未找到 mpv-x86_64 资产"; exit 1 }
+            $assetName = $a.name
+            $url = $a.browser_download_url
         } catch {
             Write-Warn2 "GitHub API 不可用（$($_.Exception.Message)），降级为重定向解析 ..."
-            $tag = Get-LatestTagViaRedirect
+            $tag = Get-LatestTagViaRedirectCustom $repo
             if (-not $tag) { Write-Err "无法获取最新版本号，请检查网络后重试"; exit 1 }
-            $url = "https://github.com/mpv-player/mpv/releases/download/$tag/mpv-$tag-x86_64-w64-mingw32.zip"
         }
     }
-
-    $assetName = "mpv-$tag-x86_64-w64-mingw32.zip"
+    if (-not $assetName) {
+        $assetName = Get-ShinchiroAssetName $tag
+        if (-not $assetName) { Write-Err "未找到 $tag 的 mpv-x86_64 资产"; exit 1 }
+    }
 
     New-Item -ItemType Directory -Path $dlDir -Force | Out-Null
     $zipPath = Join-Path $dlDir $assetName
 
-    # 缓存有效则复用
+    # 缓存有效则复用（shinchiro 无官方 sha256，按存在即复用）
     if (Test-Path $zipPath) {
-        if ($sha256 -and (Get-FileSha256 $zipPath) -eq $sha256) {
-            Write-Ok "复用已缓存的 $assetName（校验通过）"
-        } elseif ($sha256) {
-            Write-Warn2 "缓存损坏，重新下载 ..."
-            Remove-Item $zipPath -Force
-        } else {
-            Write-Ok "复用已缓存的 $assetName（降级模式，跳过校验）"
-        }
-    }
-    if (-not (Test-Path $zipPath)) {
-        Write-Info "下载 mpv 官方构建 $tag ..."
-        try { Invoke-WebRequest -Uri $url -OutFile $zipPath -TimeoutSec 600 }
+        Write-Ok "复用已缓存的 $assetName"
+    } else {
+        if (-not $url) { $url = "https://github.com/$repo/releases/download/$tag/$assetName" }
+        Write-Info "下载 mpv 构建 $assetName ..."
+        try { Invoke-WebRequest -Uri $url -OutFile $zipPath -TimeoutSec 900 }
         catch { Write-Err "下载失败：$($_.Exception.Message)"; exit 1 }
-        if ($sha256) {
-            if ((Get-FileSha256 $zipPath) -ne $sha256) { Write-Err "SHA256 校验失败"; exit 1 }
-            Write-Ok "SHA256 校验通过"
-        }
     }
 
-    # 解压（双层 zip）
+    # 解压（单层 7z：mpv.exe / mpv.com / d3dcompiler_43.dll / doc 等）
     $sevenZip = Find-SevenZip
+    if (-not $sevenZip) { Write-Err "解压 7z 需要 7-Zip（未找到）"; exit 1 }
     $stage = Join-Path $dlDir "_build_stage_$tag"
     if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
     New-Item -ItemType Directory -Path $stage -Force | Out-Null
-    if ($sevenZip) { & $sevenZip x $zipPath -o"$stage" -y | Out-Null }
-    else           { Expand-Archive $zipPath -DestinationPath $stage -Force }
+    & $sevenZip x $zipPath -o"$stage" -y | Out-Null
 
-    $innerZip = Get-ChildItem $stage -Filter '*.zip' | Select-Object -First 1
-    $binDir = $stage
-    if ($innerZip) {
-        $innerDir = Join-Path $stage '_inner'
-        New-Item -ItemType Directory -Path $innerDir -Force | Out-Null
-        if ($sevenZip) { & $sevenZip x $innerZip.FullName -o"$innerDir" -y | Out-Null }
-        else           { Expand-Archive $innerZip.FullName -DestinationPath $innerDir -Force }
-        $binDir = $innerDir
+    # 构建标识（从资产名提取 git hash）
+    $gitHash = $null
+    if ($assetName -match '-git-([0-9a-f]+)\.7z$') { $gitHash = $Matches[1] }
+    return @{ Tag = "$tag$(if ($gitHash) { "-git-$gitHash" })"; BinDir = $stage; Stage = $stage }
+}
+
+# ━━━ 定位/获取原版 mpv-lazy（VapourSynth 运行时的来源） ━━
+# 优先级：-VSSource 参数 > 本地常见路径 glob > hooke007 官方 release 下载
+function Get-LazySource {
+    # 1) 显式参数
+    $candidates = @()
+    if ($VSSource) { $candidates += $VSSource }
+    # 2) 本地已知下载位置
+    $candidates += @(
+        'E:\常用文件\下载\mpv-lazy-*.exe',
+        "$env:USERPROFILE\Downloads\mpv-lazy-*.exe"
+    )
+    foreach ($c in $candidates) {
+        $hit = Get-ChildItem $c -ErrorAction SilentlyContinue | Sort-Object Name -Descending | Select-Object -First 1
+        if ($hit) { return $hit.FullName }
+        if (Test-Path $c) { return $c }   # 目录形式
     }
-    return @{ Tag = $tag; BinDir = $binDir; Stage = $stage }
+    # 3) 联网下载 hooke007 最新完整版（302 重定向取 tag，再从 expanded_assets 找完整版 exe）
+    Write-Warn2 "本地未找到原版 mpv-lazy，尝试从 hooke007 官方 release 下载 ..."
+    try {
+        $req = [Net.HttpWebRequest]::Create('https://github.com/hooke007/mpv_PlayKit/releases/latest')
+        $req.AllowAutoRedirect = $false
+        $req.UserAgent = 'mpv-lazy-ng-builder'
+        $req.Timeout = 30000
+        $resp = $req.GetResponse()
+        $loc = $resp.Headers['Location']
+        $resp.Close()
+        if ($loc -notmatch '/tag/(.+)$') { return $null }
+        $lazyTag = $Matches[1]
+        $assetPage = Invoke-WebRequest -Uri "https://github.com/hooke007/mpv_PlayKit/releases/expanded_assets/$lazyTag" -UseBasicParsing -TimeoutSec 30
+        # 完整版形如 mpv-lazy-<date>.exe（排除 -noVS.7z / 源码包）
+        $m = [regex]::Match($assetPage.Content, '/hooke007/mpv_PlayKit/releases/download/[^\"]*?mpv-lazy-[^\"]*?\.exe')
+        if (-not $m.Success) { Write-Warn2 "release 页未找到完整版 exe"; return $null }
+        $url = 'https://github.com' + $m.Value
+        New-Item -ItemType Directory -Path $dlDir -Force | Out-Null
+        $exePath = Join-Path $dlDir "mpv-lazy-$lazyTag.exe"
+        if (-not (Test-Path $exePath)) {
+            Write-Info "下载原版 mpv-lazy $lazyTag（约 300MB，供提取 VS 运行时）..."
+            Invoke-WebRequest -Uri $url -OutFile $exePath -TimeoutSec 1800
+        } else {
+            Write-Ok "复用已缓存的原版 mpv-lazy $lazyTag"
+        }
+        return $exePath
+    } catch {
+        Write-Warn2 "下载失败：$($_.Exception.Message)"
+        return $null
+    }
+}
+
+# ━━━ 从原版包提取 VapourSynth 运行时栈 + 周边工具 ━━
+function Install-LazyExtras {
+    param([string]$PkgRoot)   # 成品包根目录（mpv.exe 所在）
+
+    $src = Get-LazySource
+    if (-not $src) {
+        Write-Warn2 "未获得原版 mpv-lazy 来源，本次构建不含 VS 运行时（补帧/AI 菜单不可用）"
+        return $false
+    }
+
+    # 解压（SFX exe）或直接使用目录
+    $extracted = $null
+    if (Test-Path $src -PathType Leaf) {
+        $sevenZip0 = Find-SevenZip
+        if (-not $sevenZip0) { Write-Warn2 "无 7-Zip 可解压原版 exe，跳过 VS 运行时"; return $false }
+        $extracted = Join-Path $dlDir "_lazy_extract"
+        if (Test-Path $extracted) { Remove-Item $extracted -Recurse -Force }
+        Write-Info "解压原版 mpv-lazy（提取 VS 运行时）..."
+        & $sevenZip0 x $src -o"$extracted" -y | Out-Null
+        $inner = Get-ChildItem $extracted -Directory | Select-Object -First 1
+        if ($inner) { $extracted = $inner.FullName }
+    } else {
+        $extracted = $src
+    }
+
+    Write-Info "复制 VapourSynth 运行时与周边工具 ..."
+
+    # 整目录：python site-packages / VS 插件（含 ONNX 模型）
+    # 注：不打 Scripts/（pip 等 shim exe）—— 新版 mpv 会扫描 exe 目录 scripts/ 报
+    #     "Can't load unknown script"；需要时可用包内 python.exe -m pip
+    foreach ($d in @('Lib', 'vs-plugins', 'vs-coreplugins', 'vsgenstubs4')) {
+        $s = Join-Path $extracted $d
+        if (Test-Path $s) { Copy-Item $s (Join-Path $PkgRoot $d) -Recurse }
+    }
+
+    # 根文件白名单（绝不覆盖本仓库自己的 mpv.exe/mpv.com 等）
+    $rootPatterns = @(
+        '*.pyd',
+        'python.exe', 'pythonw.exe', 'python3.dll', 'python3*.dll', 'python3*.zip',
+        'python3*._pth', 'python.cat',
+        'sqlite3.dll',
+        'VSPipe.exe', 'VSScript.dll', 'VSScript*.dll', 'VSVFW.dll',
+        'pfm-*-vapoursynth-win.exe', 'AVFS.exe',
+        '7z.exe', '7z.dll',
+        'yt-dlp.exe', 'umpv.exe', 'mpv_manual.pdf',
+        'vsrepo.py', 'vsgenstubs.py',
+        'msvcp140*.dll', 'vcruntime140*.dll', 'concrt140.dll', 'vccorlib140.dll',
+        'libcrypto-*.dll', 'libssl-*.dll', 'libffi-*.dll'
+    )
+    foreach ($pat in $rootPatterns) {
+        Get-ChildItem (Join-Path $extracted $pat) -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -notin @('mpv.exe', 'mpv.com') } |
+            ForEach-Object { Copy-Item $_.FullName (Join-Path $PkgRoot $_.Name) -Force }
+    }
+    return $true
 }
 
 # ━━━ 主流程 ━━
@@ -173,15 +279,24 @@ New-Item -ItemType Directory -Path $outDir -Force | Out-Null
 
 Write-Info "组装中 ..."
 
-# 1. mpv 二进制
+# 1. mpv 二进制（shinchiro 静态构建：mpv.exe / mpv.com / d3dcompiler_43.dll）
 foreach ($f in (Get-ChildItem $mpv.BinDir -File)) {
-    if ($f.Name -match '^(mpv\.exe|mpv\.com|.*\.dll)$') {
+    if ($f.Name -match '^(mpv\.exe|mpv\.com|d3dcompiler[^\.]*\.dll)$') {
         Copy-Item $f.FullName (Join-Path $outDir $f.Name)
     }
 }
 
-# 2. 配置体系
+# 2. 配置体系（剔除运行时生成的缓存/状态文件，保持包内干净）
 Copy-Item (Join-Path $repoDir 'portable_config') (Join-Path $outDir 'portable_config') -Recurse
+$cfgOut = Join-Path $outDir 'portable_config'
+foreach ($junk in @(
+    (Join-Path $cfgOut '_cache'),
+    (Join-Path $cfgOut 'saved-props.json'),
+    (Join-Path $cfgOut 'watch-later'),
+    (Join-Path $cfgOut 'bookmark-skip.json')
+)) {
+    if (Test-Path $junk) { Remove-Item $junk -Recurse -Force }
+}
 
 # 3. 补丁工具（放包根目录，双击即用）
 Copy-Item (Join-Path $repoDir 'tools\mpv-lazy-patch.bat')  $outDir
@@ -197,6 +312,15 @@ Copy-Item (Join-Path $repoDir 'installer') (Join-Path $outDir 'installer') -Recu
 foreach ($f in @('umpv.conf', 'LICENSE.MD', 'LICENSE.txt', 'portable.vs', 'README.md')) {
     $src = Join-Path $repoDir $f
     if (Test-Path $src) { Copy-Item $src $outDir }
+}
+
+# 5.2 VapourSynth 运行时栈（补帧/AI 超分）+ yt-dlp/umpv/手册（对齐原版懒人包）
+$vsOk = $false
+if (-not $NoVS) {
+    $vsOk = Install-LazyExtras $outDir
+    if ($vsOk) { Write-Ok "VapourSynth 运行时已打包（补帧/AI/yt-dlp 可用）" }
+} else {
+    Write-Warn2 "按参数跳过 VapourSynth 运行时（-NoVS）"
 }
 
 # 5.5 应用全部定制补丁（默认开启，解压即用成品；-NoPatches 跳过）
@@ -231,6 +355,7 @@ Remove-Item $mpv.Stage -Recurse -Force -ErrorAction SilentlyContinue
     mpv       = $mpv.Tag
     package   = $pkgName
     patched   = (-not $NoPatches)
+    vs        = [bool]$vsOk
     buildDate = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
 } | ConvertTo-Json | Out-File (Join-Path $outDir 'VERSION.json') -Encoding utf8 -NoNewline
 

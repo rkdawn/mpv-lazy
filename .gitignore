@@ -1,3 +1,9 @@
 dist/
 updater/_download/
 *.7z
+
+# mpv 运行时生成的缓存与状态文件（不得入库）
+portable_config/_cache/
+portable_config/saved-props.json
+portable_config/watch-later/
+portable_config/bookmark-skip.json

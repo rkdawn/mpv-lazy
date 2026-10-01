@@ -1,22 +1,23 @@
 ﻿<#
 .SYNOPSIS
-    mpv-lazy-ng 主程序更新器（跟随 mpv 官方）
+    mpv-lazy-ng 主程序更新器（跟随 mpv 官方 master 每日构建）
 .DESCRIPTION
-    从 mpv-player/mpv 官方 GitHub Releases 检查并下载最新版主程序，
-    自动替换 mpv.exe / mpv.com / 依赖 dll，配置文件不受影响。
+    从 shinchiro/mpv-winbuild-cmake Releases 检查并下载最新 mpv 构建
+    （该构建随 mpv 官方 master 每日更新，且启用 vapoursynth —— 补帧/AI 滤镜必需；
+      mpv 官方 Releases 的 CI 构建不含 vapoursynth，故不采用），
+    自动替换 mpv.exe / mpv.com / d3dcompiler_43.dll，配置文件不受影响。
 
     用法：
       update-mpv.bat                    交互式检查并更新
       update-mpv.ps1 -Check             仅检查新版本，不下载
       update-mpv.ps1 -Y                 跳过确认自动更新
       update-mpv.ps1 -Component ytdlp   更新 yt-dlp.exe
-      update-mpv.ps1 -Arch msvc         使用 MSVC 构建（默认 mingw）
 #>
 param(
     [switch]$Check,                     # 仅检查
     [switch]$Y,                         # 自动确认
-    [ValidateSet('mingw', 'msvc')]
-    [string]$Arch = 'mingw',            # 官方提供两种 Windows x64 构建
+    [ValidateSet('x86_64', 'x86_64-v3')]
+    [string]$Arch = 'x86_64',           # shinchiro 构建变体
     [ValidateSet('mpv', 'ytdlp')]
     [string]$Component = 'mpv'          # 更新组件
 )
@@ -77,6 +78,20 @@ function Get-LatestTagViaRedirect {
         $resp.Close()
         if ($loc -match '/tag/(.+)$') { return $Matches[1] }
     } catch {}
+    return $null
+}
+
+# ━━━ 从 expanded_assets 页面解析资产名（shinchiro 资产名含 git hash，需页面抓取） ━━
+function Get-ShinchiroAssetName {
+    param([string]$Tag)
+    $page = Invoke-WebRequest -Uri "https://github.com/shinchiro/mpv-winbuild-cmake/releases/expanded_assets/$Tag" -UseBasicParsing -TimeoutSec 30
+    $pattern = [regex]::Escape($Tag)
+    if ($Arch -eq 'x86_64-v3') {
+        $m = [regex]::Match($page.Content, "/shinchiro/mpv-winbuild-cmake/releases/download/$pattern/(mpv-x86_64-v3-\d{8}-git-[0-9a-f]+\.7z)")
+    } else {
+        $m = [regex]::Match($page.Content, "/shinchiro/mpv-winbuild-cmake/releases/download/$pattern/(mpv-x86_64-\d{8}-git-[0-9a-f]+\.7z)")
+    }
+    if ($m.Success) { return $m.Groups[1].Value }
     return $null
 }
 
@@ -171,39 +186,48 @@ function Find-SevenZip {
 if ($Component -eq 'mpv') {
 
     Write-Host ""
-    Write-Host " ━━ mpv-lazy-ng · mpv 主程序更新（官方源） ━━" -ForegroundColor Cyan
+    Write-Host " ━━ mpv-lazy-ng · mpv 主程序更新（shinchiro 每日构建 · 含 vapoursynth） ━━" -ForegroundColor Cyan
     Write-Host ""
 
     $installed = Get-InstalledMpvVersion
     if ($installed) { Write-Info "当前版本：$installed" }
     else            { Write-Warn2 "当前版本：未检测到 mpv.exe（将全新安装）" }
 
-    $rel = Get-LatestRelease 'mpv-player/mpv'
+    $repo = 'shinchiro/mpv-winbuild-cmake'
+    $rel = Get-LatestRelease $repo
     $tag = $rel.tag_name
     $pubDate = '未知'
     try { $pubDate = ([datetime]$rel.published_at).ToString('yyyy-MM-dd') } catch {}
-    Write-Info "官方最新：$tag   （发布于 $pubDate）"
+    Write-Info "最新构建：$tag   （发布于 $pubDate）"
 
-    # 构造资产名（官方格式：mpv-v0.41.0-x86_64-w64-mingw32.zip）
-    $archSuffix = if ($Arch -eq 'msvc') { 'x86_64-pc-windows-msvc' } else { 'x86_64-w64-mingw32' }
-    $assetName  = "mpv-$tag-$archSuffix.zip"
-    $dl = Get-AssetUrl $rel $assetName 'mpv-player/mpv'
-    if (-not $dl.Url) {
-        Write-Err "资产未找到：$assetName"
-        Write-Warn2 "该版本可能未提供此架构构建，可尝试 -Arch msvc / -Arch mingw"
-        exit 1
+    # 资产名（API 资产列表优先；降级时从 expanded_assets 页面抓取）
+    $assetName = $null
+    $dl = $null
+    if ($rel.assets.Count -gt 0) {
+        $archPat = if ($Arch -eq 'x86_64-v3') { 'mpv-x86_64-v3-\d{8}-git-[0-9a-f]+\.7z' } else { 'mpv-x86_64-\d{8}-git-[0-9a-f]+\.7z' }
+        $a = $rel.assets | Where-Object { $_.name -match "^$archPat`$" } | Select-Object -First 1
+        if ($a) {
+            $assetName = $a.name
+            $dl = @{ Url = $a.browser_download_url; Sha256 = $null }   # shinchiro 无官方 sha256
+        }
+    }
+    if (-not $assetName) {
+        $assetName = Get-ShinchiroAssetName $tag
+        if (-not $assetName) { Write-Err "未找到 $tag 的 mpv 资产（$Arch）"; exit 1 }
+        $dl = @{ Url = "https://github.com/$repo/releases/download/$tag/$assetName"; Sha256 = $null }
     }
 
-    # 已是最新？（简单比较：已安装版本字符串包含 tag 去掉 v 的版本号）
-    $verNum = $tag -replace '^v', ''
-    if ($installed -and $installed -match [regex]::Escape($verNum)) {
-        Write-Ok "已是最新版本，无需更新"
+    # 已是最新？（比较安装版本中的 git hash 与资产名中的 hash）
+    $gitHash = $null
+    if ($assetName -match '-git-([0-9a-f]+)\.7z$') { $gitHash = $Matches[1] }
+    if ($installed -and $gitHash -and $installed -match [regex]::Escape($gitHash)) {
+        Write-Ok "已是最新构建（$gitHash），无需更新"
         exit 0
     }
-    if ($Check) { Write-Warn2 "有新版本 $tag，使用 update-mpv.bat 执行更新"; exit 0 }
+    if ($Check) { Write-Warn2 "有新构建 $assetName，使用 update-mpv.bat 执行更新"; exit 0 }
 
     if (-not $Y) {
-        $confirm = Read-Host "  是否下载并更新到 $tag ？(Y/n)"
+        $confirm = Read-Host "  是否下载并更新到 $assetName ？(Y/n)"
         if ($confirm -and $confirm -ne 'Y' -and $confirm -ne 'y') { Write-Info "已取消"; exit 0 }
     }
 
@@ -212,41 +236,26 @@ if ($Component -eq 'mpv') {
     $zipPath = Join-Path $dlDir $assetName
     if (-not (Download-Asset $dl.Url $zipPath $dl.Sha256)) { exit 1 }
 
-    # 解压（官方 zip 是双层：外层包含 mpv-git-<date>-<hash>-x86_64.zip）
+    # 解压（shinchiro 单层 7z）
     $sevenZip = Find-SevenZip
+    if (-not $sevenZip) { Write-Err "解压需要 7-Zip"; exit 1 }
     $stageDir = Join-Path $dlDir '_stage'
     if (Test-Path $stageDir) { Remove-Item $stageDir -Recurse -Force }
     New-Item -ItemType Directory -Path $stageDir -Force | Out-Null
 
     Write-Info "解压 ..."
-    if ($sevenZip) {
-        & $sevenZip x $zipPath -o"$stageDir" -y | Out-Null
-    } else {
-        Expand-Archive -Path $zipPath -DestinationPath $stageDir -Force
-    }
+    & $sevenZip x $zipPath -o"$stageDir" -y | Out-Null
 
-    # 找内层 zip
-    $innerZip = Get-ChildItem $stageDir -Filter '*.zip' | Select-Object -First 1
-    $binDir = $stageDir
-    if ($innerZip) {
-        Write-Info "解压内层包（官方双层打包） ..."
-        $innerDir = Join-Path $stageDir '_inner'
-        New-Item -ItemType Directory -Path $innerDir -Force | Out-Null
-        if ($sevenZip) { & $sevenZip x $innerZip.FullName -o"$innerDir" -y | Out-Null }
-        else           { Expand-Archive -Path $innerZip.FullName -DestinationPath $innerDir -Force }
-        $binDir = $innerDir
-    }
-
-    # 替换二进制：mpv.exe / mpv.com / *.dll → 根目录
-    Write-Info "替换主程序与依赖库 ..."
+    # 替换二进制：mpv.exe / mpv.com / d3dcompiler_43.dll（静态构建，无其他依赖 dll）
+    Write-Info "替换主程序 ..."
     $replaced = 0
-    foreach ($f in (Get-ChildItem $binDir -File)) {
-        if ($f.Name -match '^(mpv\.exe|mpv\.com|.*\.dll)$') {
+    foreach ($f in (Get-ChildItem $stageDir -File)) {
+        if ($f.Name -match '^(mpv\.exe|mpv\.com|d3dcompiler[^\.]*\.dll)$') {
             Copy-Item $f.FullName (Join-Path $rootDir $f.Name) -Force
             $replaced++
         }
     }
-    Write-Ok "已替换 $replaced 个文件（mpv.exe + mpv.com + 依赖 dll）"
+    Write-Ok "已替换 $replaced 个文件（mpv.exe + mpv.com + d3dcompiler_43.dll）"
 
     # 验证
     $newVer = Get-InstalledMpvVersion
@@ -256,13 +265,13 @@ if ($Component -eq 'mpv') {
     $vj = @{}
     $old = Read-VersionJson
     if ($old) { $vj['ytdlp'] = $old.ytdlp }
-    $vj['mpv'] = $tag
+    $vj['mpv'] = $assetName -replace '\.7z$', ''
     Write-VersionJson $vj
 
     # 清理暂存
     Remove-Item $stageDir -Recurse -Force -ErrorAction SilentlyContinue
     Write-Host ""
-    Write-Ok "mpv 已更新至 $tag"
+    Write-Ok "mpv 已更新至 $assetName"
     Write-Info "配置（portable_config）与补丁不受影响"
 }
 

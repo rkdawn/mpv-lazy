@@ -1,0 +1,35 @@
+﻿
+ ━━ mpv-lazy-ng 完整懒人包构建 ━━
+
+  GitHub API 不可用（远程服务器返回错误: (403) 已禁止。），降级为重定向解析 ...
+  复用已缓存的 mpv-x86_64-20261001-git-3186d369f9.7z
+  mpv 版本：20261001-git-3186d369f9
+  组装中 ...
+  解压原版 mpv-lazy（提取 VS 运行时）...
+  复制 VapourSynth 运行时与周边工具 ...
+  VapourSynth 运行时已打包（补帧/AI/yt-dlp 可用）
+  应用全部定制补丁（无边框/65%/连播/单击暂停/音量/书签跳过 ...）
+      + 已添加 border=no
+      + 已添加 autofit=65%
+      + 已添加 osd-playlist-entry=filename
+      + 已添加 autocreate-playlist=same
+      + directory-mode=ignore → lazy
+      + input_uosc.conf 已修改
+      + scripts\smart-click.lua 已写入
+      + script-opts.conf 已修改
+      + mpv.conf: volume-max 改为 100（去重）
+      + saved-props.json 已清空
+      + input_uosc.conf: 音量快捷键已禁用
+      + scripts\bookmark-skip.lua 已写入
+      + input_uosc.conf: 已添加 Ctrl+LEFT, Ctrl+RIGHT, Ctrl+B, Ctrl+X, 菜单项
+  全部 7 个补丁模块已预应用（可用包内 mpv-lazy-patch.bat 随时恢复单项）
+  组装完成：10155 个文件，359.6 MB
+  输出目录：D:\ClaudeCode\MPV\mpv-lazy-ng\dist\mpv-lazy-ng-20261001-mpv20261001-git-3186d369f9
+  压缩 7z ...
+  压缩包：D:\ClaudeCode\MPV\mpv-lazy-ng\dist\mpv-lazy-ng-20261001-mpv20261001-git-3186d369f9.7z （130.1 MB）
+
+  构建完成 ?
+  定制成品包：解压到任意目录 → 双击 mpv.exe 即是已配置好的播放器
+  右键菜单：运行 installer\mpv-register.bat
+  调整定制：双击 mpv-lazy-patch.bat（可恢复任意单项）
+  保持更新：双击 updater\update-mpv.bat
