@@ -217,10 +217,19 @@ if ($Component -eq 'mpv') {
         $dl = @{ Url = "https://github.com/$repo/releases/download/$tag/$assetName"; Sha256 = $null }
     }
 
-    # 已是最新？（比较安装版本中的 git hash 与资产名中的 hash）
+    # 已是最新？（版本字符串里的短哈希是资产名长哈希的前缀：
+    #   mpv --version 显示 9 位如 g3186d369f，资产名含 10 位如 3186d369f9，故用前缀比较而非包含）
     $gitHash = $null
-    if ($assetName -match '-git-([0-9a-f]+)\.7z$') { $gitHash = $Matches[1] }
-    if ($installed -and $gitHash -and $installed -match [regex]::Escape($gitHash)) {
+    if ($assetName -match '-git-([0-9a-f]+)\.7z$') { $gitHash = $Matches[1].ToLower() }
+    $isCurrent = $false
+    if ($installed -and $gitHash) {
+        if ($installed -match '-g([0-9a-f]+)\s*$' -or $installed -match '-g([0-9a-f]+)$') {
+            $isCurrent = $gitHash.StartsWith($Matches[1].ToLower())
+        } elseif ($installed -match [regex]::Escape($gitHash)) {
+            $isCurrent = $true
+        }
+    }
+    if ($isCurrent) {
         Write-Ok "已是最新构建（$gitHash），无需更新"
         exit 0
     }
@@ -301,6 +310,7 @@ elseif ($Component -eq 'ytdlp') {
     if ($installed -and $installed -eq ($tag -replace '^v', '')) {
         Write-Ok "已是最新版本"; exit 0
     }
+    if ($Check) { Write-Warn2 "有新版本 $tag，使用 update-mpv.bat 执行更新（或 update-mpv.bat ytdlp）"; exit 0 }
 
     $dl = Get-AssetUrl $rel 'yt-dlp.exe' 'yt-dlp/yt-dlp'
     if (-not $dl.Url) { Write-Err "未找到 yt-dlp.exe 资产"; exit 1 }
