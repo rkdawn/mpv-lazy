@@ -99,6 +99,29 @@ pwsh build\build-package.ps1 -Tag v0.41.0 -Skip7z
 
 构建流程：拉取 mpv 官方构建（复用本地缓存）→ 组装 portable_config / tools / updater / installer → 写入 VERSION.json → 压缩 7z。
 
+## GitHub 全自动跟随（无需本地操作）
+
+仓库内置 [auto-build workflow](.github/workflows/auto-build.yml)：
+
+- **每天 06:00（北京时间）** 自动检查 mpv 官方最新版本
+- 发现新版本 → 云端自动构建完整懒人包 → 发布到本仓库 Releases
+- 也可在 Actions 页面手动触发（支持 Force 强制重建）
+
+即：推送一次之后，**最新懒人包永远可以在 GitHub Releases 页面直接下载**，本地什么都不用做。
+
+## 片头/广告跳过 · 跨集共享（bookmark-skip）
+
+补丁工具第 7 个模块「片头片尾书签跳过」针对连续剧场景设计：
+
+- **同一目录 = 同一部剧**：在该目录的任意一集标记的片头/片尾/广告区间，
+  对该目录下**所有剧集自动生效**（包括之后新放入的集数）
+- 书签持久化在 `portable_config\script-data\bookmark_skip.json`，
+  以**目录路径**为 key，可直接查看和手工编辑
+- 快捷键：`Ctrl+←` 标记片头起点 · `Ctrl+→` 标记片尾起点 · `Ctrl+B` 标记区间（再按一次确认）· `Ctrl+X` 清除本剧书签
+- 也可从 uosc 右键菜单「播放 > 跳过片头/尾」操作，点击列表项可删除单条
+
+> 使用前先在补丁工具中应用该模块（主菜单选 7，或按 A 全部应用）。
+
 ## 同步上游
 
 - **配置更新**（hooke007 上游）：

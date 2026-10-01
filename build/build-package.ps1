@@ -51,6 +51,9 @@ function Find-SevenZip {
         'C:\Program Files (x86)\7-Zip\7z.exe'
     )
     foreach ($p in $paths) { if (Test-Path $p) { return $p } }
+    # CI/PATH 环境
+    $cmd = Get-Command 7z -ErrorAction SilentlyContinue
+    if ($cmd) { return $cmd.Source }
     return $null
 }
 

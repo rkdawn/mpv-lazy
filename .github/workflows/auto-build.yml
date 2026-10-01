@@ -1,0 +1,78 @@
+name: auto-build
+
+# 跟随 mpv 官方：每天检查上游新版本，有新版自动构建懒人包并发布 Release
+on:
+  schedule:
+    - cron: '0 22 * * *'    # UTC 22:00 = 北京时间每天 06:00
+  workflow_dispatch:
+    inputs:
+      force:
+        description: '强制构建（忽略版本检查）'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  check-and-build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: 查询 mpv 官方最新版本
+        id: upstream
+        shell: pwsh
+        run: |
+          $tag = (Invoke-RestMethod 'https://api.github.com/repos/mpv-player/mpv/releases/latest' `
+                   -Headers @{ 'User-Agent' = 'mpv-lazy-ng-ci' }).tag_name
+          "tag=$tag" | Out-File $env:GITHUB_OUTPUT -Append
+          Write-Host "mpv 官方最新: $tag"
+
+      - name: 检查是否已构建过该版本
+        id: check
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $up = '${{ steps.upstream.outputs.tag }}'
+          $existing = gh release list --repo $env:GITHUB_REPOSITORY --limit 50 |
+                      Select-String -SimpleMatch "mpv$up"
+          if ($existing -and '${{ inputs.force }}' -ne 'true') {
+            "skip=true" | Out-File $env:GITHUB_OUTPUT -Append
+            Write-Host "mpv$up 已构建过，跳过"
+          } else {
+            "skip=false" | Out-File $env:GITHUB_OUTPUT -Append
+            Write-Host "需要构建 mpv$up"
+          }
+
+      - name: 构建懒人包
+        if: steps.check.outputs.skip == 'false'
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File build/build-package.ps1 -Y
+          Get-ChildItem dist
+
+      - name: 发布 Release
+        if: steps.check.outputs.skip == 'false'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $up = '${{ steps.upstream.outputs.tag }}'
+          $date = Get-Date -Format 'yyyyMMdd'
+          $tag = "auto-mpv$up-$date"
+          $archive = Get-ChildItem dist -Filter *.7z | Select-Object -First 1
+          $body = @"
+          ## mpv-lazy-ng 自动构建
+
+          - mpv 主程序：**$up**（[官方 Release](https://github.com/mpv-player/mpv/releases/tag/$up)）
+          - 构建日期：$(Get-Date -Format 'yyyy-MM-dd HH:mm')
+
+          解压即用。更新请使用包内 ``updater\update-mpv.bat``。
+          "@
+          gh release create $tag $archive.FullName `
+            --repo $env:GITHUB_REPOSITORY `
+            --title "mpv-lazy-ng · mpv $up" `
+            --notes $body

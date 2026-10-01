@@ -613,15 +613,14 @@ local function get_data_path()
     return mp.command_native({"expand-path", DATA_FILE})
 end
 
-local function dir_hash(path)
+-- 书签以「目录路径」为 key：同一目录下的所有剧集共享书签
+-- 路径规范化：统一 / 分隔符 + 小写（Windows 大小写不敏感）+ 去尾斜杠
+local function get_dir_key(path)
     if not path or path == "" then return nil end
     local dir = utils.split_path(path)
     if not dir or dir == "" then return nil end
-    local h = 0
-    for i = 1, #dir do
-        h = (h * 31 + string.byte(dir, i)) % 1000000007
-    end
-    return tostring(h)
+    dir = dir:gsub("\\", "/"):gsub("/+$", ""):lower()
+    return dir
 end
 
 local function get_dir_name(path)
@@ -661,6 +660,19 @@ local function load_bookmarks()
     local ok, data = pcall(utils.parse_json, content)
     if not ok or type(data) ~= "table" then bookmarks = {}; return end
     bookmarks = data
+    -- 兼容迁移：旧版 hash key（纯数字）转为目录路径 key
+    local migrated = false
+    for k, v in pairs(bookmarks) do
+        if tonumber(k) and v.path then
+            bookmarks[get_dir_key(v.path .. "/x.mp4")] = v
+            bookmarks[k] = nil
+            migrated = true
+        end
+    end
+    if migrated then save_bookmarks() end
+    local dirs, items = 0, 0
+    for _, v in pairs(bookmarks) do dirs = dirs + 1; items = items + #(v.items or {}) end
+    msg.info(string.format("bookmarks loaded: %d dirs, %d items", dirs, items))
 end
 
 local function save_bookmarks()
@@ -671,29 +683,16 @@ local function save_bookmarks()
     if f then f:write(utils.format_json(bookmarks)); f:close() end
 end
 
-local function get_current_hash()
+local function get_current_key()
     local path = mp.get_property("path")
     if not path then return nil end
-    return dir_hash(path)
-end
-
--- 清理目录已不存在的书签
-local function cleanup_orphaned()
-    local changed = false
-    for h, data in pairs(bookmarks) do
-        local dir = data.path
-        if dir and not os.rename(dir, dir) then
-            bookmarks[h] = nil
-            changed = true
-        end
-    end
-    if changed then save_bookmarks() end
+    return get_dir_key(path)
 end
 
 local function get_current_items()
-    local h = get_current_hash()
-    if not h or not bookmarks[h] then return {} end
-    return bookmarks[h].items or {}
+    local key = get_current_key()
+    if not key or not bookmarks[key] then return {} end
+    return bookmarks[key].items or {}
 end
 
 local function sort_items(items)
@@ -721,20 +720,21 @@ end
 local function add_bookmark(label, start_, end_)
     local path = mp.get_property("path")
     if not path then mp.osd_message("无文件播放中", OSD_DURATION); return end
-    local h = dir_hash(path)
-    if not h then return end
-    if not bookmarks[h] then
-        bookmarks[h] = { name = get_dir_name(path), path = utils.split_path(path):gsub("[/\\]$", ""), items = {} }
+    local key = get_dir_key(path)
+    if not key then return end
+    if not bookmarks[key] then
+        bookmarks[key] = { name = get_dir_name(path), path = utils.split_path(path):gsub("[/\\]$", ""), items = {} }
     end
     if label == "片头" or label == "片尾" then
-        local items = bookmarks[h].items
+        local items = bookmarks[key].items
         for i = #items, 1, -1 do
             if items[i].label == label then table.remove(items, i) end
         end
     end
-    table.insert(bookmarks[h].items, { label = label, ["start"] = start_, ["end"] = end_ })
-    sort_items(bookmarks[h].items)
+    table.insert(bookmarks[key].items, { label = label, ["start"] = start_, ["end"] = end_ })
+    sort_items(bookmarks[key].items)
     save_bookmarks()
+    msg.info(string.format("bookmark added: [%s] %s %s→%s", key, label, format_time(start_), format_time(end_)))
 end
 
 function mark_opening()
@@ -794,12 +794,12 @@ end
 -- ========== 删除 ==========
 
 function delete_index(idx)
-    local h = get_current_hash()
-    if not h or not bookmarks[h] then return end
-    local items = bookmarks[h].items
+    local key = get_current_key()
+    if not key or not bookmarks[key] then return end
+    local items = bookmarks[key].items
     if not items or idx < 1 or idx > #items then return end
     local removed = table.remove(items, idx)
-    if #items == 0 then bookmarks[h] = nil end
+    if #items == 0 then bookmarks[key] = nil end
     save_bookmarks()
     mp.osd_message(string.format("已删除 %s %s→%s", removed.label, format_time(removed["start"]), format_time(removed["end"])), OSD_DURATION)
     refresh_menu()
@@ -812,10 +812,10 @@ function clear_current()
         mp.osd_message("已取消标记", OSD_DURATION)
         return
     end
-    local h = get_current_hash()
-    if not h or not bookmarks[h] then mp.osd_message("无书签", OSD_DURATION); return end
-    local n = #(bookmarks[h].items or {})
-    bookmarks[h] = nil
+    local key = get_current_key()
+    if not key or not bookmarks[key] then mp.osd_message("无书签", OSD_DURATION); return end
+    local n = #(bookmarks[key].items or {})
+    bookmarks[key] = nil
     save_bookmarks()
     mp.osd_message(string.format("已清除 %d 条", n), OSD_DURATION)
     refresh_menu()
@@ -930,7 +930,6 @@ end)
 -- ========== 初始化 ==========
 
 load_bookmarks()
-cleanup_orphaned()
 msg.info("bookmark-skip loaded")
 
 '@
