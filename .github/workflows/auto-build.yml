@@ -64,13 +64,20 @@ jobs:
           $date = Get-Date -Format 'yyyyMMdd'
           $tag = "auto-mpv$up-$date"
           $archive = Get-ChildItem dist -Filter *.7z | Select-Object -First 1
+          # force 重建场景：同 tag release 已存在则删除后重建，保证 Release 始终为最新构建
+          gh release view $tag --repo $env:GITHUB_REPOSITORY 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "release $tag 已存在，删除重建"
+            gh release delete $tag --repo $env:GITHUB_REPOSITORY --yes --cleanup-tag
+          }
           $body = @"
-          ## mpv-lazy-ng 自动构建
+          ## mpv-lazy-ng 自动构建（定制成品）
 
           - mpv 主程序：**$up**（[官方 Release](https://github.com/mpv-player/mpv/releases/tag/$up)）
           - 构建日期：$(Get-Date -Format 'yyyy-MM-dd HH:mm')
+          - 已预应用全部定制补丁，解压即用
 
-          解压即用。更新请使用包内 ``updater\update-mpv.bat``。
+          更新请使用包内 ``updater\update-mpv.bat``。
           "@
           gh release create $tag $archive.FullName `
             --repo $env:GITHUB_REPOSITORY `
