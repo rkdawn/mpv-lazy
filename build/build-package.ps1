@@ -54,38 +54,65 @@ function Find-SevenZip {
     return $null
 }
 
+# ━━━ 通过 302 重定向获取最新 tag（API 限流时的降级通道，不消耗配额） ━━
+function Get-LatestTagViaRedirect {
+    $req = [Net.HttpWebRequest]::Create('https://github.com/mpv-player/mpv/releases/latest')
+    $req.AllowAutoRedirect = $false
+    $req.UserAgent = 'mpv-lazy-ng-builder'
+    $req.Timeout = 30000
+    try {
+        $resp = $req.GetResponse()
+        $loc = $resp.Headers['Location']
+        $resp.Close()
+        if ($loc -match '/tag/(.+)$') { return $Matches[1] }
+    } catch {}
+    return $null
+}
+
 # ━━━ 获取 mpv 官方构建（优先复用缓存） ━━
 function Get-MpvBinaries {
     param([string]$DesiredTag)   # 为空则取最新
 
     $headers = @{ 'User-Agent' = 'mpv-lazy-ng-builder' }
-    try {
-        $rel = Invoke-RestMethod -Uri 'https://api.github.com/repos/mpv-player/mpv/releases/latest' -Headers $headers -TimeoutSec 30
-    } catch {
-        Write-Err "GitHub API 请求失败：$($_.Exception.Message)"; exit 1
+    $sha256 = $null
+    if ($DesiredTag) {
+        # 指定版本：直接构造固定 URL
+        $tag = $DesiredTag
+        $url = "https://github.com/mpv-player/mpv/releases/download/$tag/mpv-$tag-x86_64-w64-mingw32.zip"
+    } else {
+        try {
+            $rel = Invoke-RestMethod -Uri 'https://api.github.com/repos/mpv-player/mpv/releases/latest' -Headers $headers -TimeoutSec 30
+            $tag = $rel.tag_name
+            $assetName = "mpv-$tag-x86_64-w64-mingw32.zip"
+            $asset = $rel.assets | Where-Object { $_.name -eq $assetName }
+            if (-not $asset) { Write-Err "资产未找到：$assetName"; exit 1 }
+            $url = $asset.browser_download_url
+            if ($asset.digest -match 'sha256:([0-9a-f]+)') { $sha256 = $Matches[1] }
+        } catch {
+            Write-Warn2 "GitHub API 不可用（$($_.Exception.Message)），降级为重定向解析 ..."
+            $tag = Get-LatestTagViaRedirect
+            if (-not $tag) { Write-Err "无法获取最新版本号，请检查网络后重试"; exit 1 }
+            $url = "https://github.com/mpv-player/mpv/releases/download/$tag/mpv-$tag-x86_64-w64-mingw32.zip"
+        }
     }
-    $tag = if ($DesiredTag) { $DesiredTag } else { $rel.tag_name }
 
     $assetName = "mpv-$tag-x86_64-w64-mingw32.zip"
-    $asset = $rel.assets | Where-Object { $_.name -eq $assetName }
-    if (-not $asset -and -not $DesiredTag) { Write-Err "资产未找到：$assetName"; exit 1 }
-    if (-not $asset) {
-        # 指定了历史版本时按固定 URL 下载
-        $url = "https://github.com/mpv-player/mpv/releases/download/$tag/$assetName"
-        $sha256 = $null
-    } else {
-        $url = $asset.browser_download_url
-        $sha256 = $null
-        if ($asset.digest -match 'sha256:([0-9a-f]+)') { $sha256 = $Matches[1] }
-    }
 
     New-Item -ItemType Directory -Path $dlDir -Force | Out-Null
     $zipPath = Join-Path $dlDir $assetName
 
     # 缓存有效则复用
-    if ((Test-Path $zipPath) -and $sha256 -and (Get-FileSha256 $zipPath) -eq $sha256) {
-        Write-Ok "复用已缓存的 $assetName"
-    } else {
+    if (Test-Path $zipPath) {
+        if ($sha256 -and (Get-FileSha256 $zipPath) -eq $sha256) {
+            Write-Ok "复用已缓存的 $assetName（校验通过）"
+        } elseif ($sha256) {
+            Write-Warn2 "缓存损坏，重新下载 ..."
+            Remove-Item $zipPath -Force
+        } else {
+            Write-Ok "复用已缓存的 $assetName（降级模式，跳过校验）"
+        }
+    }
+    if (-not (Test-Path $zipPath)) {
         Write-Info "下载 mpv 官方构建 $tag ..."
         try { Invoke-WebRequest -Uri $url -OutFile $zipPath -TimeoutSec 600 }
         catch { Write-Err "下载失败：$($_.Exception.Message)"; exit 1 }
@@ -132,7 +159,7 @@ Write-Ok "mpv 版本：$($mpv.Tag)"
 
 # 组装目录
 $dateTag = Get-Date -Format 'yyyyMMdd'
-$pkgName = "$rootName-$dateTag-mpv$($mpv.Tag)"
+$pkgName = "$rootName-$dateTag-mpv$($mpv.Tag -replace '^v', '')"
 $distDir = Join-Path $repoDir 'dist'
 $pkgDir  = Join-Path $distDir $pkgName
 $outDir  = Join-Path $pkgDir $rootName

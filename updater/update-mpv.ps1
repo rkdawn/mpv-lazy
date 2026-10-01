@@ -63,18 +63,50 @@ function Write-VersionJson {
     $data | ConvertTo-Json | Out-File $verFile -Encoding utf8 -NoNewline
 }
 
-# ━━━ GitHub API ━━
+# ━━━ GitHub API（限流时自动降级：302 重定向解析，不消耗 API 配额） ━━
+function Get-LatestTagViaRedirect {
+    param([string]$Repo)
+    # https://github.com/<repo>/releases/latest 会 302 到 .../tag/<tag>
+    $req = [Net.HttpWebRequest]::Create("https://github.com/$Repo/releases/latest")
+    $req.AllowAutoRedirect = $false
+    $req.UserAgent = 'mpv-lazy-ng-updater'
+    $req.Timeout = 30000
+    try {
+        $resp = $req.GetResponse()
+        $loc = $resp.Headers['Location']
+        $resp.Close()
+        if ($loc -match '/tag/(.+)$') { return $Matches[1] }
+    } catch {}
+    return $null
+}
+
 function Get-LatestRelease {
     param([string]$Repo)
     $headers = @{ 'User-Agent' = 'mpv-lazy-ng-updater' }
-    # 无 token 直连；限流时提示
     try {
         return Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/latest" -Headers $headers -TimeoutSec 30
     } catch {
-        Write-Err "GitHub API 请求失败：$($_.Exception.Message)"
-        Write-Warn2 "可能是网络问题或 API 限流（匿名 60 次/小时），请稍后重试"
-        exit 1
+        Write-Warn2 "GitHub API 不可用（$($_.Exception.Message)），降级为重定向解析 ..."
+        $tag = Get-LatestTagViaRedirect $Repo
+        if (-not $tag) {
+            Write-Err "无法获取最新版本号，请检查网络后重试"
+            exit 1
+        }
+        # 构造最小 release 对象（无 digest，跳过 sha256 校验）
+        return [PSCustomObject]@{
+            tag_name      = $tag
+            published_at  = 'unknown'
+            assets        = @()
+        }
     }
+}
+
+function Get-AssetUrl {
+    # 优先 API 资产对象；否则构造固定下载 URL
+    param($Release, [string]$AssetName, [string]$Repo)
+    $a = $Release.assets | Where-Object { $_.name -eq $AssetName }
+    if ($a) { return @{ Url = $a.browser_download_url; Sha256 = if ($a.digest -match 'sha256:([0-9a-f]+)') { $Matches[1] } else { $null } } }
+    return @{ Url = "https://github.com/$Repo/releases/download/$($Release.tag_name)/$AssetName"; Sha256 = $null }
 }
 
 function Get-FileSha256 {
@@ -148,13 +180,15 @@ if ($Component -eq 'mpv') {
 
     $rel = Get-LatestRelease 'mpv-player/mpv'
     $tag = $rel.tag_name
-    Write-Info "官方最新：$tag   （发布于 $($rel.published_at.Substring(0,10))）"
+    $pubDate = '未知'
+    try { $pubDate = ([datetime]$rel.published_at).ToString('yyyy-MM-dd') } catch {}
+    Write-Info "官方最新：$tag   （发布于 $pubDate）"
 
     # 构造资产名（官方格式：mpv-v0.41.0-x86_64-w64-mingw32.zip）
     $archSuffix = if ($Arch -eq 'msvc') { 'x86_64-pc-windows-msvc' } else { 'x86_64-w64-mingw32' }
     $assetName  = "mpv-$tag-$archSuffix.zip"
-    $asset = $rel.assets | Where-Object { $_.name -eq $assetName }
-    if (-not $asset) {
+    $dl = Get-AssetUrl $rel $assetName 'mpv-player/mpv'
+    if (-not $dl.Url) {
         Write-Err "资产未找到：$assetName"
         Write-Warn2 "该版本可能未提供此架构构建，可尝试 -Arch msvc / -Arch mingw"
         exit 1
@@ -164,7 +198,6 @@ if ($Component -eq 'mpv') {
     $verNum = $tag -replace '^v', ''
     if ($installed -and $installed -match [regex]::Escape($verNum)) {
         Write-Ok "已是最新版本，无需更新"
-        if (-not $Check) { exit 0 }
         exit 0
     }
     if ($Check) { Write-Warn2 "有新版本 $tag，使用 update-mpv.bat 执行更新"; exit 0 }
@@ -177,9 +210,7 @@ if ($Component -eq 'mpv') {
     # 下载
     New-Item -ItemType Directory -Path $dlDir -Force | Out-Null
     $zipPath = Join-Path $dlDir $assetName
-    $sha256 = $null
-    if ($asset.digest -match 'sha256:([0-9a-f]+)') { $sha256 = $Matches[1] }
-    if (-not (Download-Asset $asset.browser_download_url $zipPath $sha256)) { exit 1 }
+    if (-not (Download-Asset $dl.Url $zipPath $dl.Sha256)) { exit 1 }
 
     # 解压（官方 zip 是双层：外层包含 mpv-git-<date>-<hash>-x86_64.zip）
     $sevenZip = Find-SevenZip
@@ -254,20 +285,20 @@ elseif ($Component -eq 'ytdlp') {
 
     $rel = Get-LatestRelease 'yt-dlp/yt-dlp'
     $tag = $rel.tag_name
-    Write-Info "官方最新：$tag   （发布于 $($rel.published_at.Substring(0,10))）"
+    $pubDate = '未知'
+    try { $pubDate = ([datetime]$rel.published_at).ToString('yyyy-MM-dd') } catch {}
+    Write-Info "官方最新：$tag   （发布于 $pubDate）"
 
     if ($installed -and $installed -eq ($tag -replace '^v', '')) {
         Write-Ok "已是最新版本"; exit 0
     }
 
-    $asset = $rel.assets | Where-Object { $_.name -eq 'yt-dlp.exe' }
-    if (-not $asset) { Write-Err "未找到 yt-dlp.exe 资产"; exit 1 }
+    $dl = Get-AssetUrl $rel 'yt-dlp.exe' 'yt-dlp/yt-dlp'
+    if (-not $dl.Url) { Write-Err "未找到 yt-dlp.exe 资产"; exit 1 }
 
     New-Item -ItemType Directory -Path $dlDir -Force | Out-Null
     $tmp = Join-Path $dlDir 'yt-dlp.exe'
-    $sha256 = $null
-    if ($asset.digest -match 'sha256:([0-9a-f]+)') { $sha256 = $Matches[1] }
-    if (-not (Download-Asset $asset.browser_download_url $tmp $sha256)) { exit 1 }
+    if (-not (Download-Asset $dl.Url $tmp $dl.Sha256)) { exit 1 }
 
     Copy-Item $tmp $ytPath -Force
     Write-Ok "已更新：$(& $ytPath --version 2>$null | Select-Object -First 1)"
