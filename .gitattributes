@@ -1,0 +1,6 @@
+*.conf text eol=lf
+*.lua text eol=lf
+*.md text eol=lf
+*.vs text eol=lf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
