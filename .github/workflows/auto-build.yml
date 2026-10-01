@@ -64,6 +64,53 @@ jobs:
           pwsh -NoProfile -ExecutionPolicy Bypass -File build/build-package.ps1 -Y -Tag $dateTag
           Get-ChildItem dist
 
+      - name: 构建后自动验证（不过检不发版）
+        if: steps.check.outputs.skip == 'false'
+        shell: pwsh
+        run: |
+          $pkg = Get-ChildItem dist -Directory | Select-Object -First 1
+          $root = Get-ChildItem $pkg.FullName -Directory | Select-Object -First 1
+          $errors = @()
+          # 1. 关键文件存在且非空（防 lite 空 blob、构建源错位类事故）
+          $need = @(
+            'mpv.exe', 'mpv.com', 'VERSION.json',
+            'portable_config/mpv.conf', 'portable_config/input_uosc.conf',
+            'portable_config/menu.conf', 'portable_config/profiles.conf',
+            'portable_config/script-opts.conf',
+            'portable_config/scripts/uosc/main.lua',
+            'portable_config/scripts/bookmark-skip.lua',
+            'portable_config/scripts/thumb_engine/main.lua',
+            'portable_config/fonts/LXGWWenKaiMonoLite-Regular.ttf',
+            'portable_config/fonts/uosc_textures.ttf',
+            'portable_config/shaders/FSRCNNX/FSRCNNX_x2_16_0_4_1.glsl',
+            'portable_config/shaders/Anime4K/Anime4K_Restore_CNN_L.glsl',
+            'portable_config/vs/MEMC_MVT_LQ.vpy',
+            'python.exe', 'VSPipe.exe', 'VSScript.dll',
+            'vs-plugins/mvtools.dll', 'yt-dlp.exe', 'umpv.exe',
+            'mpv-lazy-patch.bat', 'updater/update-mpv.ps1'
+          )
+          foreach ($f in $need) {
+            $p = Join-Path $root.FullName ($f -replace '/', [IO.Path]::DirectorySeparatorChar)
+            if (-not (Test-Path $p)) { $errors += "缺失 $f" }
+            elseif ((Get-Item $p).Length -eq 0) { $errors += "空文件 $f" }
+          }
+          # 2. vapoursynth 滤镜必须可用（防无 vs 的 mpv 构建混入成品）
+          $vsOut = & (Join-Path $root.FullName 'mpv.com') --no-config --vf=vapoursynth=help 2>&1 | Out-String
+          if ($vsOut -match "isn't supported" -or $LASTEXITCODE -ne 0) { $errors += 'mpv 不支持 vapoursynth' }
+          # 3. 定制补丁已预应用（无边框标记 + 书签键位）
+          $conf = Get-Content (Join-Path $root.FullName 'portable_config/mpv.conf') -Raw
+          if ($conf -notmatch 'border\s*=\s*no') { $errors += '补丁未预应用: border=no 缺失' }
+          $inp = Get-Content (Join-Path $root.FullName 'portable_config/input_uosc.conf') -Raw
+          if ($inp -notmatch 'bookmark-mark-op') { $errors += '补丁未预应用: 书签键位缺失' }
+          # 4. 出厂纯净（无运行时残留）
+          if (Test-Path (Join-Path $root.FullName 'portable_config/saved-props.json')) { $errors += '含 saved-props.json 残留' }
+          if (Test-Path (Join-Path $root.FullName 'portable_config/_cache')) { $errors += '含 _cache 残留' }
+          if ($errors) {
+            $errors | ForEach-Object { Write-Host "::error::自动验证失败: $_" }
+            exit 1
+          }
+          Write-Host "自动验证通过：$($need.Count) 个关键文件非空 + vapoursynth 可用 + 补丁已预应用 + 出厂纯净"
+
       - name: 发布 Release
         if: steps.check.outputs.skip == 'false'
         shell: pwsh
