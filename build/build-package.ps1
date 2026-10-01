@@ -359,6 +359,15 @@ Remove-Item $mpv.Stage -Recurse -Force -ErrorAction SilentlyContinue
     buildDate = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
 } | ConvertTo-Json | Out-File (Join-Path $outDir 'VERSION.json') -Encoding utf8 -NoNewline
 
+# 终检：剔除补丁应用阶段生成的运行时状态（对齐原版出厂状态：首次运行 mpv 后才生成）
+foreach ($junk in @(
+    (Join-Path $outDir 'portable_config\saved-props.json'),
+    (Join-Path $outDir 'portable_config\_cache'),
+    (Join-Path $outDir 'portable_config\bookmark-skip.json')
+)) {
+    if (Test-Path $junk) { Remove-Item $junk -Recurse -Force }
+}
+
 # 统计
 $nFiles = (Get-ChildItem $outDir -Recurse -File).Count
 $sizeMB = [math]::Round((Get-ChildItem $outDir -Recurse -File | Measure-Object Length -Sum).Sum / 1MB, 1)
@@ -370,6 +379,8 @@ if (-not $Skip7z) {
     $sevenZip = Find-SevenZip
     if ($sevenZip) {
         $archive = Join-Path $distDir "$pkgName.7z"
+        # 先删旧包：7z a 会向已有压缩包追加更新，残留已删除文件的旧条目
+        if (Test-Path $archive) { Remove-Item $archive -Force }
         Write-Info "压缩 7z ..."
         & $sevenZip a -t7z -mx=7 "$archive" "$outDir" | Out-Null
         if (Test-Path $archive) {
