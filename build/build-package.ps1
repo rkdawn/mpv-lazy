@@ -8,15 +8,17 @@
     产出：dist/mpv-lazy-ng-<日期>-mpv<版本>/ 与同名 .7z
 
     用法：
-      build-package.bat                交互式打包
+      build-package.bat                交互式打包（默认已应用全部定制补丁，解压即用）
       build-package.ps1 -Y             跳过确认
+      build-package.ps1 -NoPatches     不应用定制补丁（纯净 mpv-lazy 原版配置）
       build-package.ps1 -Tag v0.41.0   指定 mpv 版本（默认最新）
       build-package.ps1 -Skip7z        只产出目录，不压缩
 #>
 param(
     [switch]$Y,                        # 自动确认
     [string]$Tag = '',                 # 指定 mpv 版本 tag（如 v0.41.0），默认最新
-    [switch]$Skip7z                    # 不打包 7z
+    [switch]$Skip7z,                   # 不打包 7z
+    [switch]$NoPatches                 # 不应用定制补丁
 )
 
 $ErrorActionPreference = 'Stop'
@@ -197,6 +199,30 @@ foreach ($f in @('umpv.conf', 'LICENSE.MD', 'LICENSE.txt', 'portable.vs', 'READM
     if (Test-Path $src) { Copy-Item $src $outDir }
 }
 
+# 5.5 应用全部定制补丁（默认开启，解压即用成品；-NoPatches 跳过）
+if (-not $NoPatches) {
+    Write-Info "应用全部定制补丁（无边框/65%/连播/单击暂停/音量/书签跳过 ...）"
+    $patchFile = Join-Path $repoDir 'tools\mpv-lazy-patch.ps1'
+    $cfgDir = Join-Path $outDir 'portable_config'
+    $benc = New-Object System.Text.UTF8Encoding $false
+    $tokens = $null; $perr = $null
+    $past = [System.Management.Automation.Language.Parser]::ParseFile($patchFile, [ref]$tokens, [ref]$perr)
+    $passign = $past.FindAll({ param($n)
+        $n -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+        $n.Left.Extent.Text -eq '$PatchList' }, $true) | Select-Object -First 1
+    $bPatchList = & ([ScriptBlock]::Create($passign.Right.Extent.Text))
+    foreach ($fd in $past.FindAll({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $true)) {
+        . ([ScriptBlock]::Create($fd.Extent.Text))
+    }
+    foreach ($bp in $bPatchList) {
+        $r = & $bp.Apply $cfgDir $benc
+        if ($r) { $r -split "`r?`n" | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray } }
+    }
+    Write-Ok "全部 $($bPatchList.Count) 个补丁模块已预应用（可用包内 mpv-lazy-patch.bat 随时恢复单项）"
+} else {
+    Write-Warn2 "跳过定制补丁（纯净原版配置）"
+}
+
 # 清理暂存
 Remove-Item $mpv.Stage -Recurse -Force -ErrorAction SilentlyContinue
 
@@ -204,6 +230,7 @@ Remove-Item $mpv.Stage -Recurse -Force -ErrorAction SilentlyContinue
 @{
     mpv       = $mpv.Tag
     package   = $pkgName
+    patched   = (-not $NoPatches)
     buildDate = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
 } | ConvertTo-Json | Out-File (Join-Path $outDir 'VERSION.json') -Encoding utf8 -NoNewline
 
@@ -231,7 +258,11 @@ if (-not $Skip7z) {
 
 Write-Host ""
 Write-Ok "构建完成 ✔"
-Write-Info "使用方法：解压到任意目录 → 双击 mpv.exe 播放"
+if ($NoPatches) {
+    Write-Info "纯净包：解压到任意目录 → 双击 mpv.exe 播放 → 定制请双击 mpv-lazy-patch.bat"
+} else {
+    Write-Info "定制成品包：解压到任意目录 → 双击 mpv.exe 即是已配置好的播放器"
+}
 Write-Info "右键菜单：运行 installer\mpv-register.bat"
-Write-Info "应用定制：双击 mpv-lazy-patch.bat"
+Write-Info "调整定制：双击 mpv-lazy-patch.bat（可恢复任意单项）"
 Write-Info "保持更新：双击 updater\update-mpv.bat"
