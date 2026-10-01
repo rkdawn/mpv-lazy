@@ -400,5 +400,6 @@ if ($NoPatches) {
     Write-Info "定制成品包：解压到任意目录 → 双击 mpv.exe 即是已配置好的播放器"
 }
 Write-Info "右键菜单：运行 installer\mpv-register.bat"
+Write-Info "格式关联：运行 installer\mpv-assoc.bat（取消用 mpv-unassoc.bat）"
 Write-Info "调整定制：双击 mpv-lazy-patch.bat（可恢复任意单项）"
 Write-Info "保持更新：双击 updater\update-mpv.bat"
