@@ -1,7 +1,9 @@
 # mpv-lazy-ng · 跟随 mpv 官方的懒人包
 
 基于 [hooke007/mpv_PlayKit](https://github.com/hooke007/mpv_PlayKit)（mpv-lazy）的配置体系复刻，
-**主程序改为跟随 [mpv-player/mpv](https://github.com/mpv-player/mpv) 官方 Releases 更新**，
+**主程序跟随 [shinchiro/mpv-winbuild-cmake](https://github.com/shinchiro/mpv-winbuild-cmake) 每日构建更新**
+（该构建随 [mpv 官方 master](https://github.com/mpv-player/mpv) 每日更新，且启用 vapoursynth——补帧/AI 滤镜必需；
+mpv 官方 Releases 的 CI 构建不含 vapoursynth，故不采用），
 并整合自研的模块化补丁工具，形成可持续维护的新懒人包项目。
 
 > 解压即用 · 配置中文注释齐全 · 一键更新主程序 · 一键重建完整包
@@ -12,14 +14,13 @@
 
 | 项目 | mpv-lazy（原） | mpv-lazy-ng（本项目） |
 |---|---|---|
-| mpv 主程序 | hooke007 打包的第三方构建，随其发布节奏 | **mpv 官方 CI 构建**（x86_64 mingw），双击即更新到最新 |
-| 更新方式 | 等待整包重新发布 | `updater\update-mpv.bat` 一键跟随官方 |
+| mpv 主程序 | hooke007 打包的第三方构建，随其发布节奏 | **shinchiro 每日构建**（含 vapoursynth），每日跟随 mpv master |
+| 更新方式 | 等待整包重新发布 | `updater\update-mpv.bat` 一键跟随最新构建 |
 | 配置体系 | hooke007 中文注释配置 | 同源继承（portable_config 同步自 lite 分支） |
-| 定制补丁 | 无 | `mpv-lazy-patch.bat` 8 个模块，应用/恢复可逆 |
-| VapourSynth / Python | 整包内置（约 80 MB） | 不内置；yt-dlp 可选一键更新 |
-| 重建发布 | 人工打包 | `build\build-package.bat` 一键构建完整包 |
-
-mpv 官方构建说明：release 二进制为 CI 构建，未包含全部功能（如无编码输出），对日常播放无影响。
+| 定制补丁 | 无 | `mpv-lazy-patch.bat` 7 个模块，应用/恢复可逆，**成品包已预应用** |
+| VapourSynth / Python | 整包内置 | 同样内置（vs-plugins 含 ONNX 模型，补帧/AI 开箱即用） |
+| yt-dlp / umpv / 中文手册 | 内置 | 内置；yt-dlp 可一键更新 |
+| 重建发布 | 人工打包 | `build\build-package.bat` 一键构建 + GitHub Actions 每日自动构建发布 |
 
 ## 目录结构
 
