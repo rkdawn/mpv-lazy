@@ -1031,6 +1031,56 @@ msg.info("bookmark-skip loaded")
 
             return $msgs -join "`r`n"
         }
+    },
+
+    # ──── 8. 顶栏最大化按钮状态图标 ────
+    @{
+        Name    = "顶栏最大化按钮状态图标"
+        Desc    = "全屏/最大化时顶栏中间按钮显示还原图标 filter_none，窗口态显示 crop_square"
+        Apply   = {
+            param($dir, $enc)
+            $tb = Join-Path $dir "scripts\uosc\elements\TopBar.lua"
+            if (-not (Test-Path $tb)) { return "[跳过] TopBar.lua 不存在" }
+            $content = [IO.File]::ReadAllText($tb, $enc)
+            if ($content -match 'lazy-patch:maxicon') { return '  - 顶栏按钮图标补丁已存在' }
+            $anchor = "`tlocal max = {icon = 'crop_square', command = maximized_command}"
+            if (-not $content.Contains($anchor)) { return "[跳过] 未找到锚点（uosc 版本不符）" }
+            $blockLines = @(
+                "`t-- [lazy-patch:maxicon] 全屏/最大化时切换为还原图标",
+                "`tdo",
+                "`t`tlocal function _lazy_update_max_icon()",
+                "`t`t`tmax.icon = (state.fullscreen or state.maximized) and 'filter_none' or 'crop_square'",
+                "`t`t`tif request_render then request_render() end",
+                "`t`tend",
+                "`t`tmp.observe_property('fullscreen', 'bool', _lazy_update_max_icon)",
+                "`t`tmp.observe_property('window-maximized', 'bool', _lazy_update_max_icon)",
+                "`tend"
+            )
+            $content = $content.Replace($anchor, $anchor + "`n" + ($blockLines -join "`n"))
+            [IO.File]::WriteAllText($tb, $content, $enc)
+            return '  + 顶栏最大化按钮已支持状态图标'
+        }
+        Restore = {
+            param($dir, $enc)
+            $tb = Join-Path $dir "scripts\uosc\elements\TopBar.lua"
+            if (-not (Test-Path $tb)) { return "[跳过] TopBar.lua 不存在" }
+            $content = [IO.File]::ReadAllText($tb, $enc)
+            if ($content -notmatch 'lazy-patch:maxicon') { return '  - 无需恢复' }
+            $lines = [IO.File]::ReadAllLines($tb, $enc)
+            $newLines = [System.Collections.ArrayList]::new()
+            $skip = $false; $removed = 0
+            foreach ($line in $lines) {
+                if ($line -match 'lazy-patch:maxicon') { $skip = $true; $removed++; continue }
+                if ($skip) {
+                    $removed++
+                    if ($line -match "^`tend$") { $skip = $false }
+                    continue
+                }
+                [void]$newLines.Add($line)
+            }
+            Write-LfFile $tb $newLines.ToArray() $enc
+            return "  - 已移除顶栏按钮图标补丁（$removed 行）"
+        }
     }
 )
 
