@@ -105,7 +105,7 @@ jobs:
           $inp = Get-Content (Join-Path $root.FullName 'portable_config/input_uosc.conf') -Raw
           if ($inp -notmatch 'bookmark-mark-op') { $errors += '补丁未预应用: 书签键位缺失' }
           $tb = Get-Content (Join-Path $root.FullName 'portable_config/scripts/uosc/elements/TopBar.lua') -Raw
-          if ($tb -notmatch 'lazy-patch:maxicon') { $errors += '补丁未预应用: 顶栏按钮图标缺失' }
+          if ($tb -notmatch 'lazy-patch:maxicon-cmd') { $errors += '补丁未预应用: 顶栏按钮最大化/还原缺失' }
           # 4. 出厂纯净（无运行时残留）
           if (Test-Path (Join-Path $root.FullName 'portable_config/saved-props.json')) { $errors += '含 saved-props.json 残留' }
           if (Test-Path (Join-Path $root.FullName 'portable_config/_cache')) { $errors += '含 _cache 残留' }

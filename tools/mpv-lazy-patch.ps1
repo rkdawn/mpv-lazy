@@ -1033,53 +1033,91 @@ msg.info("bookmark-skip loaded")
         }
     },
 
-    # ──── 8. 顶栏最大化按钮状态图标 ────
+    # ──── 8. 顶栏中间按钮：最大化/还原 + 状态图标 ────
     @{
-        Name    = "顶栏最大化按钮状态图标"
-        Desc    = "全屏/最大化时顶栏中间按钮显示还原图标 filter_none，窗口态显示 crop_square"
+        Name    = "顶栏中间按钮最大化还原"
+        Desc    = "无边框模式下顶栏中间按钮改为最大化/还原（与底部全屏按钮分工），并按状态切换图标：占满时 filter_none，窗口态 crop_square"
         Apply   = {
             param($dir, $enc)
             $tb = Join-Path $dir "scripts\uosc\elements\TopBar.lua"
             if (-not (Test-Path $tb)) { return "[跳过] TopBar.lua 不存在" }
             $content = [IO.File]::ReadAllText($tb, $enc)
-            if ($content -match 'lazy-patch:maxicon') { return '  - 顶栏按钮图标补丁已存在' }
-            $anchor = "`tlocal max = {icon = 'crop_square', command = maximized_command}"
-            if (-not $content.Contains($anchor)) { return "[跳过] 未找到锚点（uosc 版本不符）" }
-            $blockLines = @(
-                "`t-- [lazy-patch:maxicon] 全屏/最大化时切换为还原图标",
-                "`tdo",
-                "`t`tlocal function _lazy_update_max_icon()",
-                "`t`t`tmax.icon = (state.fullscreen or state.maximized) and 'filter_none' or 'crop_square'",
-                "`t`t`tif request_render then request_render() end",
-                "`t`tend",
-                "`t`tmp.observe_property('fullscreen', 'bool', _lazy_update_max_icon)",
-                "`t`tmp.observe_property('window-maximized', 'bool', _lazy_update_max_icon)",
-                "`tend"
-            )
-            $content = $content.Replace($anchor, $anchor + "`n" + ($blockLines -join "`n"))
+            if ($content -match 'lazy-patch:maxicon-cmd') { return '  - 顶栏按钮补丁已存在' }
+            $msgs = @()
+
+            # (a) 无边框分支命令：原版是"退出最大化并切全屏"（与底部全屏按钮重复），
+            #     改为真正的最大化/还原（全屏时也视为占满，点击还原）
+            $cmdOld = "`t`t`tor 'set window-maximized no;cycle fullscreen')"
+            $cmdNew = "`t`t`tor (state.fullormaxed and 'set fullscreen no;set window-maximized no' or 'set window-maximized yes')) -- [lazy-patch:maxicon-cmd]"
+            if ($content.Contains($cmdNew)) {
+                # 已打命令补丁（理论上前面 marker 已拦截，防御）
+            } elseif ($content.Contains($cmdOld)) {
+                $content = $content.Replace($cmdOld, $cmdNew)
+                $msgs += '  + 顶栏中间按钮命令已改为最大化/还原'
+            } else {
+                return '[跳过] 未找到命令锚点（uosc 版本不符）'
+            }
+
+            # (b) 状态图标观察块（若 v1 已打则跳过）
+            if ($content -match 'lazy-patch:maxicon\]') {
+                $msgs += '  - 顶栏按钮图标观察块已存在'
+            } else {
+                $anchor = "`tlocal max = {icon = 'crop_square', command = maximized_command}"
+                if (-not $content.Contains($anchor)) { return '[跳过] 未找到图标锚点（uosc 版本不符）' }
+                $blockLines = @(
+                    "`t-- [lazy-patch:maxicon] 全屏/最大化时切换为还原图标",
+                    "`tdo",
+                    "`t`tlocal function _lazy_update_max_icon()",
+                    "`t`t`tmax.icon = state.fullormaxed and 'filter_none' or 'crop_square'",
+                    "`t`t`tif request_render then request_render() end",
+                    "`t`tend",
+                    "`t`tmp.observe_property('fullscreen', 'bool', _lazy_update_max_icon)",
+                    "`t`tmp.observe_property('window-maximized', 'bool', _lazy_update_max_icon)",
+                    "`tend"
+                )
+                $content = $content.Replace($anchor, $anchor + "`n" + ($blockLines -join "`n"))
+                $msgs += '  + 顶栏中间按钮已支持状态图标'
+            }
+
             [IO.File]::WriteAllText($tb, $content, $enc)
-            return '  + 顶栏最大化按钮已支持状态图标'
+            return $msgs -join "`r`n"
         }
         Restore = {
             param($dir, $enc)
             $tb = Join-Path $dir "scripts\uosc\elements\TopBar.lua"
             if (-not (Test-Path $tb)) { return "[跳过] TopBar.lua 不存在" }
             $content = [IO.File]::ReadAllText($tb, $enc)
-            if ($content -notmatch 'lazy-patch:maxicon') { return '  - 无需恢复' }
-            $lines = [IO.File]::ReadAllLines($tb, $enc)
-            $newLines = [System.Collections.ArrayList]::new()
-            $skip = $false; $removed = 0
-            foreach ($line in $lines) {
-                if ($line -match 'lazy-patch:maxicon') { $skip = $true; $removed++; continue }
-                if ($skip) {
-                    $removed++
-                    if ($line -match "^`tend$") { $skip = $false }
-                    continue
-                }
-                [void]$newLines.Add($line)
+            $msgs = @()
+
+            # (a) 还原命令
+            $cmdNew = "`t`t`tor (state.fullormaxed and 'set fullscreen no;set window-maximized no' or 'set window-maximized yes')) -- [lazy-patch:maxicon-cmd]"
+            $cmdOld = "`t`t`tor 'set window-maximized no;cycle fullscreen')"
+            if ($content.Contains($cmdNew)) {
+                $content = $content.Replace($cmdNew, $cmdOld)
+                $msgs += '  - 顶栏中间按钮命令已还原'
             }
-            Write-LfFile $tb $newLines.ToArray() $enc
-            return "  - 已移除顶栏按钮图标补丁（$removed 行）"
+
+            # (b) 移除图标观察块（基于内存中的 $content，保留 (a) 的改动）
+            if ($content -match 'lazy-patch:maxicon\]') {
+                $lines = $content -split "`r?`n"
+                $newLines = [System.Collections.ArrayList]::new()
+                $skip = $false; $removed = 0
+                foreach ($line in $lines) {
+                    if ($line -match 'lazy-patch:maxicon\]') { $skip = $true; $removed++; continue }
+                    if ($skip) {
+                        $removed++
+                        if ($line -match "^`tend$") { $skip = $false }
+                        continue
+                    }
+                    [void]$newLines.Add($line)
+                }
+                $content = $newLines.ToArray() -join "`n"
+                $msgs += "  - 已移除顶栏按钮图标观察块（$removed 行）"
+            }
+
+            if ($msgs.Count -eq 0) { return '  - 无需恢复' }
+            [IO.File]::WriteAllText($tb, $content, $enc)
+            return $msgs -join "`r`n"
         }
     }
 )
