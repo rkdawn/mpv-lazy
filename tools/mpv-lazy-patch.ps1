@@ -1033,33 +1033,28 @@ msg.info("bookmark-skip loaded")
         }
     },
 
-    # ──── 8. 顶栏中间按钮：最大化/还原 + 状态图标 ────
+    # ──── 8. 顶栏中间按钮状态图标 ────
     @{
-        Name    = "顶栏中间按钮最大化还原"
-        Desc    = "无边框模式下顶栏中间按钮改为最大化/还原（与底部全屏按钮分工），并按状态切换图标：占满时 filter_none，窗口态 crop_square"
+        Name    = "顶栏中间按钮状态图标"
+        Desc    = "无边框模式下顶栏中间按钮保持上游设计（全屏/还原，规避 Windows 无边框最大化的任务栏残留/缝隙/状态错乱问题），图标随状态切换：占满时 filter_none，窗口态 crop_square"
         Apply   = {
             param($dir, $enc)
             $tb = Join-Path $dir "scripts\uosc\elements\TopBar.lua"
             if (-not (Test-Path $tb)) { return "[跳过] TopBar.lua 不存在" }
             $content = [IO.File]::ReadAllText($tb, $enc)
-            if ($content -match 'lazy-patch:maxicon-cmd') { return '  - 顶栏按钮补丁已存在' }
             $msgs = @()
 
-            # (a) 无边框分支命令：原版是"退出最大化并切全屏"（与底部全屏按钮重复），
-            #     改为真正的最大化/还原（全屏时也视为占满，点击还原）
-            $cmdOld = "`t`t`tor 'set window-maximized no;cycle fullscreen')"
+            # (a) 若存在 v2 的命令改动（真最大化），还原为上游全屏切换命令
             $cmdNew = "`t`t`tor (state.fullormaxed and 'set fullscreen no;set window-maximized no' or 'set window-maximized yes')) -- [lazy-patch:maxicon-cmd]"
+            $cmdOld = "`t`t`tor 'set window-maximized no;cycle fullscreen')"
             if ($content.Contains($cmdNew)) {
-                # 已打命令补丁（理论上前面 marker 已拦截，防御）
-            } elseif ($content.Contains($cmdOld)) {
-                $content = $content.Replace($cmdOld, $cmdNew)
-                $msgs += '  + 顶栏中间按钮命令已改为最大化/还原'
-            } else {
-                return '[跳过] 未找到命令锚点（uosc 版本不符）'
+                $content = $content.Replace($cmdNew, $cmdOld)
+                $msgs += '  - v2 最大化命令已还原为上游全屏切换（无边框最大化在 Windows 有天生毛病）'
             }
 
-            # (b) 状态图标观察块（若 v1 已打则跳过）
+            # (b) 状态图标观察块（若已打则跳过）
             if ($content -match 'lazy-patch:maxicon\]') {
+                if ($msgs.Count -eq 0) { return '  - 顶栏按钮图标补丁已存在' }
                 $msgs += '  - 顶栏按钮图标观察块已存在'
             } else {
                 $anchor = "`tlocal max = {icon = 'crop_square', command = maximized_command}"
