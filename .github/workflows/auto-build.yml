@@ -88,7 +88,8 @@ jobs:
             'python.exe', 'VSPipe.exe', 'VSScript.dll',
             'vs-plugins/mvtools.dll', 'yt-dlp.exe', 'umpv.exe',
             'mpv-lazy-patch.bat', 'updater/update-mpv.ps1',
-            'installer/mpv-assoc.bat', 'installer/mpv-unassoc.bat'
+            'installer/mpv-assoc.bat', 'installer/mpv-unassoc.bat',
+            'installer/mpv-assoc.ps1', 'installer/mpv-unassoc.ps1'
           )
           foreach ($f in $need) {
             $p = Join-Path $root.FullName ($f -replace '/', [IO.Path]::DirectorySeparatorChar)

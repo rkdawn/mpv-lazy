@@ -49,7 +49,7 @@ mpv-lazy/
 1. 解压完整包到任意目录（路径不含特殊字符为宜）
 2. 双击 `mpv.exe` 直接播放，或将视频拖入
 3. 可选注册右键菜单：运行 `installer\mpv-register.bat`
-4. 可选关联视频/音频格式（双击即用 mpv 打开）：运行 `installer\mpv-assoc.bat`（取消用 `mpv-unassoc.bat`；已被其他播放器设为默认的格式会自动跳过不覆盖）
+4. 可选关联视频/音频格式（双击即用 mpv 打开）：运行 `installer\mpv-assoc.bat`（强占模式：已被其他播放器占用的格式会接管并备份原设置，取消并还原用 `mpv-unassoc.bat`）
 5. 应用个人定制：双击 `mpv-lazy-patch.bat`，选择模块应用
 6. 保持最新：双击 `updater\update-mpv.bat`
 
