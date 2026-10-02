@@ -27,8 +27,19 @@ jobs:
         id: upstream
         shell: pwsh
         run: |
-          $rel = Invoke-RestMethod 'https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest' `
-                   -Headers @{ 'User-Agent' = 'mpv-lazy-ci' }
+          # 带 GITHUB_TOKEN 提高限额（60→1000 次/时），并带重试兜底
+          $hdr = @{ 'User-Agent' = 'mpv-lazy-ci'; Authorization = "Bearer $env:GITHUB_TOKEN" }
+          $rel = $null
+          for ($i = 1; $i -le 3; $i++) {
+            try {
+              $rel = Invoke-RestMethod 'https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest' -Headers $hdr
+              break
+            } catch {
+              Write-Host "第 $i 次查询失败: $($_.Exception.Message)"
+              if ($i -eq 3) { throw }
+              Start-Sleep -Seconds (20 * $i)
+            }
+          }
           $asset = $rel.assets | Where-Object { $_.name -match '^mpv-x86_64-\d{8}-git-[0-9a-f]+\.7z$' } | Select-Object -First 1
           if (-not $asset) { throw "release $($rel.tag_name) 未找到 mpv-x86_64 资产" }
           # 构建标识：日期-git-hash（资产名去掉 .7z），如 20261001-git-3186d369f9
