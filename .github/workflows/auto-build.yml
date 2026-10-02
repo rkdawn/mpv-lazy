@@ -26,9 +26,11 @@ jobs:
       - name: 查询 shinchiro 最新构建（mpv 官方 master 跟随源）
         id: upstream
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           # 带 GITHUB_TOKEN 提高限额（60→1000 次/时），并带重试兜底
-          $hdr = @{ 'User-Agent' = 'mpv-lazy-ci'; Authorization = "Bearer $env:GITHUB_TOKEN" }
+          $hdr = @{ 'User-Agent' = 'mpv-lazy-ci'; Authorization = "Bearer $env:GH_TOKEN" }
           $rel = $null
           for ($i = 1; $i -le 3; $i++) {
             try {
